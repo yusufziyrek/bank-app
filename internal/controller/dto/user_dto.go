@@ -1,6 +1,11 @@
 package dto
 
-import "time"
+import (
+	"github.com/yusufziyrek/bank-app/internal/model"
+	"time"
+)
+
+// --- Request DTOs ---
 
 type CreateUserRequest struct {
 	FullName string `json:"full_name" validate:"required"`
@@ -25,6 +30,8 @@ type UpdateUserStatusRequest struct {
 	IsActive bool `json:"is_active"`
 }
 
+// --- Response DTOs ---
+
 type UserResponse struct {
 	ID        int64     `json:"id"`
 	FullName  string    `json:"full_name"`
@@ -38,4 +45,35 @@ type UserResponse struct {
 type UsersResponse struct {
 	Users []UserResponse `json:"users"`
 	Count int            `json:"count"`
+}
+
+// --- Auth-specific DTO ---
+
+type AuthResponse struct {
+	Token     string       `json:"token"`
+	ExpiresAt time.Time    `json:"expires_at"`
+	User      UserResponse `json:"user"`
+}
+
+func UserResponseFromModel(u model.User) UserResponse {
+	return UserResponse{
+		ID:        u.ID,
+		FullName:  u.FullName,
+		Email:     u.Email,
+		Role:      u.Role,
+		IsActive:  u.IsActive,
+		CreatedAt: u.CreatedAt,
+		UpdatedAt: u.UpdatedAt,
+	}
+}
+
+func UsersResponseFromModels(users []model.User) UsersResponse {
+	resp := make([]UserResponse, len(users))
+	for i, u := range users {
+		resp[i] = UserResponseFromModel(u)
+	}
+	return UsersResponse{
+		Users: resp,
+		Count: len(resp),
+	}
 }

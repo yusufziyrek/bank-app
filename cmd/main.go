@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/joho/godotenv"
 	echojwt "github.com/labstack/echo-jwt/v4"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -29,10 +30,10 @@ func (cv *CustomValidator) Validate(i interface{}) error {
 }
 
 func main() {
-	// Sert değerli konfigürasyonu oluştur
+	_ = godotenv.Load()
+
 	cfg := app.NewConfigurationManager()
 
-	// DB havuzu
 	ctx := context.Background()
 	pool, err := postgresql.GetConnectionPool(ctx, cfg.PostgreSqlConfig)
 	if err != nil {
@@ -40,26 +41,28 @@ func main() {
 	}
 	defer pool.Close()
 
-	// Echo örneği
 	e := echo.New()
+	e.Debug = true
 	e.Validator = &CustomValidator{validator: validator.New()}
 	e.Use(middleware.Logger(), middleware.Recover(), middleware.RequestID())
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: []string{"*"},
-		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete},
-		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+		AllowMethods: []string{
+			http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete,
+		},
+		AllowHeaders: []string{
+			echo.HeaderOrigin, echo.HeaderContentType,
+			echo.HeaderAccept, echo.HeaderAuthorization,
+		},
 	}))
 
-	// Repository & Service
 	repo := repository.NewUserRepository(pool)
 	svc := service.NewUserService(repo)
 
-	// Kayıt ve Giriş (herkese açık)
 	authCtrl := controller.NewAuthController(svc, cfg)
 	e.POST("/api/v1/register", authCtrl.Register)
 	e.POST("/api/v1/login", authCtrl.Login)
 
-	// JWT korumalı grup
 	jwtGroup := e.Group("/api/v1")
 	jwtGroup.Use(echojwt.WithConfig(echojwt.Config{
 		SigningKey: []byte(cfg.JwtSecret),
@@ -72,23 +75,22 @@ func main() {
 	jwtGroup.PUT("/users/:id/status", userCtrl.UpdateStatus)
 	jwtGroup.DELETE("/users/:id", userCtrl.DeleteByID)
 
-	// Graceful shutdown
-	srv := &http.Server{Addr: ":" + cfg.AppPort, Handler: e}
 	go func() {
-		log.Printf("Sunucu port %s üzerinde çalışıyor…", cfg.AppPort)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Listen error: %v", err)
+		addr := "127.0.0.1:" + cfg.AppPort
+		log.Printf("⇨ http server started on %s", addr)
+		if err := e.Start(addr); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Sunucu hatası: %v", err)
 		}
 	}()
 
-	// CTRL+C ile temiz kapanış
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt)
 	<-quit
+
 	log.Println("Sunucu kapatılıyor…")
 	ctxShut, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(ctxShut); err != nil {
-		log.Fatalf("Shutdown hatası: %v", err)
+	if err := e.Shutdown(ctxShut); err != nil {
+		log.Fatalf("Sunucu kapatma hatası: %v", err)
 	}
 }

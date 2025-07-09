@@ -5,8 +5,6 @@ import (
 	"time"
 )
 
-// --- Request DTOs ---
-
 type CreateUserRequest struct {
 	FullName string `json:"full_name" validate:"required"`
 	Email    string `json:"email" validate:"required,email"`
@@ -30,8 +28,6 @@ type UpdateUserStatusRequest struct {
 	IsActive bool `json:"is_active"`
 }
 
-// --- Response DTOs ---
-
 type UserResponse struct {
 	ID        int64     `json:"id"`
 	FullName  string    `json:"full_name"`
@@ -46,8 +42,6 @@ type UsersResponse struct {
 	Users []UserResponse `json:"users"`
 	Count int            `json:"count"`
 }
-
-// --- Auth-specific DTO ---
 
 type AuthResponse struct {
 	Token     string       `json:"token"`

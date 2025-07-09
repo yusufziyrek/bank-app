@@ -60,9 +60,9 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE TABLE IF NOT EXISTS cards (
     id BIGSERIAL PRIMARY KEY,
     account_id BIGINT REFERENCES accounts(id) ON DELETE CASCADE,
-    card_number VARCHAR(16) UNIQUE NOT NULL, -- Dikkat: Güvenli depolama yapılmalı!
+    card_number VARCHAR(16) UNIQUE NOT NULL,
     expiry_date DATE NOT NULL,
-    cvv VARCHAR(4) NOT NULL, -- UYARI: PCI DSS uyumsuzluğu! Gerçek projede depolanmamalı!
+    cvv VARCHAR(4) NOT NULL,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP

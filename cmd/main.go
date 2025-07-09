@@ -4,9 +4,12 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"time"
 
 	"github.com/go-playground/validator/v10"
-	_ "github.com/labstack/echo-jwt/v4"
+	echojwt "github.com/labstack/echo-jwt/v4"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
@@ -26,54 +29,66 @@ func (cv *CustomValidator) Validate(i interface{}) error {
 }
 
 func main() {
+	// Sert değerli konfigürasyonu oluştur
 	cfg := app.NewConfigurationManager()
-	ctx := context.Background()
 
+	// DB havuzu
+	ctx := context.Background()
 	pool, err := postgresql.GetConnectionPool(ctx, cfg.PostgreSqlConfig)
 	if err != nil {
-		log.Fatalf("DB connection failed: %v", err)
+		log.Fatalf("DB bağlantı hatası: %v", err)
 	}
 	defer pool.Close()
 
+	// Echo örneği
 	e := echo.New()
 	e.Validator = &CustomValidator{validator: validator.New()}
-
-	// Global middleware
-	e.Use(middleware.Logger())
-	e.Use(middleware.Recover())
-	e.Use(middleware.RequestID())
+	e.Use(middleware.Logger(), middleware.Recover(), middleware.RequestID())
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: []string{"*"},
-		AllowMethods: []string{echo.GET, echo.POST, echo.PUT, echo.DELETE},
-		AllowHeaders: []string{echo.HeaderAuthorization, echo.HeaderContentType},
+		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete},
+		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
 	}))
 
-	// DI
+	// Repository & Service
 	repo := repository.NewUserRepository(pool)
 	svc := service.NewUserService(repo)
 
-	// Auth routes (public)
+	// Kayıt ve Giriş (herkese açık)
 	authCtrl := controller.NewAuthController(svc, cfg)
 	e.POST("/api/v1/register", authCtrl.Register)
 	e.POST("/api/v1/login", authCtrl.Login)
 
-	// User routes (protected)
-	userCtrl := controller.NewUserController(svc)
-	g := e.Group("/api/v1")
-	g.Use(middleware.CORSWithConfig(middleware.CSRFConfig{
-		SigningKey:  []byte(cfg.JwtSecret),
-		TokenLookup: "header:Authorization",
-		AuthScheme:  "Bearer",
+	// JWT korumalı grup
+	jwtGroup := e.Group("/api/v1")
+	jwtGroup.Use(echojwt.WithConfig(echojwt.Config{
+		SigningKey: []byte(cfg.JwtSecret),
 	}))
-	g.GET("/users", userCtrl.GetAll)
-	g.GET("/users/:id", userCtrl.GetByID)
-	g.PUT("/users/:id/email", userCtrl.UpdateEmail)
-	g.PUT("/users/:id/password", userCtrl.UpdatePassword)
-	g.PUT("/users/:id/status", userCtrl.UpdateStatus)
-	g.DELETE("/users/:id", userCtrl.DeleteByID)
+	userCtrl := controller.NewUserController(svc)
+	jwtGroup.GET("/users", userCtrl.GetAll)
+	jwtGroup.GET("/users/:id", userCtrl.GetByID)
+	jwtGroup.PUT("/users/:id/email", userCtrl.UpdateEmail)
+	jwtGroup.PUT("/users/:id/password", userCtrl.UpdatePassword)
+	jwtGroup.PUT("/users/:id/status", userCtrl.UpdateStatus)
+	jwtGroup.DELETE("/users/:id", userCtrl.DeleteByID)
 
-	log.Printf("Server running on port %s…", cfg.AppPort)
-	if err := e.Start(":" + cfg.AppPort); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("Server error: %v", err)
+	// Graceful shutdown
+	srv := &http.Server{Addr: ":" + cfg.AppPort, Handler: e}
+	go func() {
+		log.Printf("Sunucu port %s üzerinde çalışıyor…", cfg.AppPort)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Listen error: %v", err)
+		}
+	}()
+
+	// CTRL+C ile temiz kapanış
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt)
+	<-quit
+	log.Println("Sunucu kapatılıyor…")
+	ctxShut, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctxShut); err != nil {
+		log.Fatalf("Shutdown hatası: %v", err)
 	}
 }

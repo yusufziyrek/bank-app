@@ -67,7 +67,11 @@ func (u *UserController) UpdateEmail(c echo.Context) error {
 	if err := c.Validate(&req); err != nil {
 		return err
 	}
-	if err := u.svc.UpdateUserEmail(c.Request().Context(), id, req.NewEmail); err != nil {
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel()
+
+	if err := u.svc.UpdateUserEmail(ctx, id, req.NewEmail); err != nil {
 		switch err {
 		case service.ErrUserNotFound:
 			return sendError(c, http.StatusNotFound, "USER_NOT_FOUND", err.Error(), "")
@@ -92,7 +96,11 @@ func (u *UserController) UpdatePassword(c echo.Context) error {
 	if err := c.Validate(&req); err != nil {
 		return err
 	}
-	if err := u.svc.UpdateUserPassword(c.Request().Context(), id, req.NewPassword); err != nil {
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel()
+
+	if err := u.svc.UpdateUserPassword(ctx, id, req.NewPassword); err != nil {
 		if err == service.ErrUserNotFound {
 			return sendError(c, http.StatusNotFound, "USER_NOT_FOUND", err.Error(), "")
 		}
@@ -110,7 +118,11 @@ func (u *UserController) UpdateStatus(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return sendError(c, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON", err.Error())
 	}
-	if err := u.svc.UpdateUserActiveStatus(c.Request().Context(), id, req.IsActive); err != nil {
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel()
+
+	if err := u.svc.UpdateUserActiveStatus(ctx, id, req.IsActive); err != nil {
 		if err == service.ErrUserNotFound {
 			return sendError(c, http.StatusNotFound, "USER_NOT_FOUND", err.Error(), "")
 		}
@@ -124,7 +136,11 @@ func (u *UserController) DeleteByID(c echo.Context) error {
 	if herr != nil {
 		return c.JSON(herr.Code, herr.Message)
 	}
-	if err := u.svc.DeleteUserByID(c.Request().Context(), id); err != nil {
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	defer cancel()
+
+	if err := u.svc.DeleteUserByID(ctx, id); err != nil {
 		if err == service.ErrUserNotFound {
 			return sendError(c, http.StatusNotFound, "USER_NOT_FOUND", err.Error(), "")
 		}

@@ -11,6 +11,39 @@ import (
 	"github.com/yusufziyrek/bank-app/internal/model"
 )
 
+const (
+	queryGetAllUsers = `
+        SELECT id, full_name, email, password_hash, role, is_active, created_at, updated_at 
+        FROM users
+    `
+	queryGetUserByID = `
+        SELECT id, full_name, email, password_hash, role, is_active, created_at, updated_at
+        FROM users WHERE id=$1
+    `
+	queryGetUserByEmail = `
+        SELECT id, full_name, email, password_hash, role, is_active, created_at, updated_at
+        FROM users WHERE email=$1
+    `
+	queryAddUser = `
+        INSERT INTO users
+            (full_name, email, password_hash, role, is_active, created_at, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        RETURNING id
+    `
+	queryUpdateUserEmail = `
+        UPDATE users SET email=$1, updated_at=$2 WHERE id=$3
+    `
+	queryUpdateUserPassword = `
+        UPDATE users SET password_hash=$1, updated_at=$2 WHERE id=$3
+    `
+	queryUpdateUserActiveStatus = `
+        UPDATE users SET is_active=$1, updated_at=$2 WHERE id=$3
+    `
+	queryDeleteUserByID = `
+        DELETE FROM users WHERE id=$1
+    `
+)
+
 type UserRepository interface {
 	GetAllUsers(ctx context.Context) ([]model.User, error)
 	GetUserByID(ctx context.Context, id int64) (model.User, error)
@@ -31,66 +64,58 @@ func NewUserRepository(pool *pgxpool.Pool) UserRepository {
 }
 
 func (r *userRepo) GetAllUsers(ctx context.Context) ([]model.User, error) {
-	rows, err := r.pool.Query(ctx, `
-        SELECT id, full_name, email, password_hash, role, is_active, created_at, updated_at
-        FROM users
-    `)
+	rows, err := r.pool.Query(ctx, queryGetAllUsers)
 	if err != nil {
-		return nil, fmt.Errorf("repo:GetAllUsers: %w", err)
+		return nil, fmt.Errorf("repo:GetAllUsers:query: %w", err)
 	}
 	defer rows.Close()
-
-	var users []model.User
-	for rows.Next() {
-		var u model.User
-		if err := rows.Scan(
-			&u.ID, &u.FullName, &u.Email, &u.PasswordHash,
-			&u.Role, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("repo:scan user: %w", err)
-		}
-		users = append(users, u)
-	}
-	if rows.Err() != nil {
-		return nil, fmt.Errorf("repo:rows err: %w", rows.Err())
+	users, err := pgx.CollectRows(rows, pgx.RowToStructByName[model.User])
+	if err != nil {
+		return nil, fmt.Errorf("repo:GetAllUsers:scan: %w", err)
 	}
 	return users, nil
 }
 
 func (r *userRepo) GetUserByID(ctx context.Context, id int64) (model.User, error) {
-	row := r.pool.QueryRow(ctx, `
-        SELECT id, full_name, email, password_hash, role, is_active, created_at, updated_at
-        FROM users WHERE id=$1
-    `, id)
-	var u model.User
-	err := row.Scan(
-		&u.ID, &u.FullName, &u.Email, &u.PasswordHash,
-		&u.Role, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
+	var user model.User
+	err := r.pool.QueryRow(ctx, queryGetUserByID, id).Scan(
+		&user.ID,
+		&user.FullName,
+		&user.Email,
+		&user.PasswordHash,
+		&user.Role,
+		&user.IsActive,
+		&user.CreatedAt,
+		&user.UpdatedAt,
 	)
+
 	if errors.Is(err, pgx.ErrNoRows) {
-		return u, pgx.ErrNoRows
+		return user, pgx.ErrNoRows
 	} else if err != nil {
-		return u, fmt.Errorf("repo:GetUserByID: %w", err)
+		return user, fmt.Errorf("repo:GetUserByID: %w", err)
 	}
-	return u, nil
+	return user, nil
 }
 
 func (r *userRepo) GetUserByEmail(ctx context.Context, email string) (model.User, error) {
-	row := r.pool.QueryRow(ctx, `
-        SELECT id, full_name, email, password_hash, role, is_active, created_at, updated_at
-        FROM users WHERE email=$1
-    `, email)
-	var u model.User
-	err := row.Scan(
-		&u.ID, &u.FullName, &u.Email, &u.PasswordHash,
-		&u.Role, &u.IsActive, &u.CreatedAt, &u.UpdatedAt,
+	var user model.User
+	err := r.pool.QueryRow(ctx, queryGetUserByEmail, email).Scan(
+		&user.ID,
+		&user.FullName,
+		&user.Email,
+		&user.PasswordHash,
+		&user.Role,
+		&user.IsActive,
+		&user.CreatedAt,
+		&user.UpdatedAt,
 	)
+
 	if errors.Is(err, pgx.ErrNoRows) {
-		return u, pgx.ErrNoRows
+		return user, pgx.ErrNoRows
 	} else if err != nil {
-		return u, fmt.Errorf("repo:GetUserByEmail: %w", err)
+		return user, fmt.Errorf("repo:GetUserByEmail: %w", err)
 	}
-	return u, nil
+	return user, nil
 }
 
 func (r *userRepo) AddUser(ctx context.Context, u *model.User) error {
@@ -98,12 +123,7 @@ func (r *userRepo) AddUser(ctx context.Context, u *model.User) error {
 	u.CreatedAt = now
 	u.UpdatedAt = now
 
-	err := r.pool.QueryRow(ctx, `
-        INSERT INTO users
-            (full_name, email, password_hash, role, is_active, created_at, updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7)
-        RETURNING id
-    `, u.FullName, u.Email, u.PasswordHash, u.Role, u.IsActive, u.CreatedAt, u.UpdatedAt).
+	err := r.pool.QueryRow(ctx, queryAddUser, u.FullName, u.Email, u.PasswordHash, u.Role, u.IsActive, u.CreatedAt, u.UpdatedAt).
 		Scan(&u.ID)
 	if err != nil {
 		return fmt.Errorf("repo:AddUser: %w", err)
@@ -112,9 +132,7 @@ func (r *userRepo) AddUser(ctx context.Context, u *model.User) error {
 }
 
 func (r *userRepo) UpdateUserEmail(ctx context.Context, id int64, email string) error {
-	cmd, err := r.pool.Exec(ctx, `
-        UPDATE users SET email=$1, updated_at=$2 WHERE id=$3
-    `, email, time.Now(), id)
+	cmd, err := r.pool.Exec(ctx, queryUpdateUserEmail, email, time.Now(), id)
 	if err != nil {
 		return fmt.Errorf("repo:UpdateEmail: %w", err)
 	}
@@ -125,9 +143,7 @@ func (r *userRepo) UpdateUserEmail(ctx context.Context, id int64, email string) 
 }
 
 func (r *userRepo) UpdateUserPassword(ctx context.Context, id int64, hash string) error {
-	cmd, err := r.pool.Exec(ctx, `
-        UPDATE users SET password_hash=$1, updated_at=$2 WHERE id=$3
-    `, hash, time.Now(), id)
+	cmd, err := r.pool.Exec(ctx, queryUpdateUserPassword, hash, time.Now(), id)
 	if err != nil {
 		return fmt.Errorf("repo:UpdatePassword: %w", err)
 	}
@@ -138,9 +154,7 @@ func (r *userRepo) UpdateUserPassword(ctx context.Context, id int64, hash string
 }
 
 func (r *userRepo) UpdateUserActiveStatus(ctx context.Context, id int64, isActive bool) error {
-	cmd, err := r.pool.Exec(ctx, `
-        UPDATE users SET is_active=$1, updated_at=$2 WHERE id=$3
-    `, isActive, time.Now(), id)
+	cmd, err := r.pool.Exec(ctx, queryUpdateUserActiveStatus, isActive, time.Now(), id)
 	if err != nil {
 		return fmt.Errorf("repo:UpdateStatus: %w", err)
 	}
@@ -151,7 +165,7 @@ func (r *userRepo) UpdateUserActiveStatus(ctx context.Context, id int64, isActiv
 }
 
 func (r *userRepo) DeleteUserByID(ctx context.Context, id int64) error {
-	cmd, err := r.pool.Exec(ctx, `DELETE FROM users WHERE id=$1`, id)
+	cmd, err := r.pool.Exec(ctx, queryDeleteUserByID, id)
 	if err != nil {
 		return fmt.Errorf("repo:DeleteUser: %w", err)
 	}

@@ -2,8 +2,11 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgconn"
 	"github.com/jackc/pgx/v5"
@@ -19,6 +22,9 @@ var (
 	ErrInactiveAccount        = errors.New("inactive account")
 )
 
+const refreshTokenLength = 64
+const refreshTokenTTL = 7 * 24 * time.Hour // 7 gün
+
 type UserService interface {
 	GetAllUsers(ctx context.Context) ([]model.User, error)
 	GetUserByID(ctx context.Context, id int64) (model.User, error)
@@ -28,6 +34,10 @@ type UserService interface {
 	UpdateUserActiveStatus(ctx context.Context, id int64, isActive bool) error
 	DeleteUserByID(ctx context.Context, id int64) error
 	AuthenticateUser(ctx context.Context, email, pwd string) (model.User, error)
+	GenerateRefreshToken(ctx context.Context, userID int64) (string, time.Time, error)
+	ValidateRefreshToken(ctx context.Context, token string) (int64, error)
+	RevokeRefreshToken(ctx context.Context, token string) error
+	RevokeAllUserRefreshTokens(ctx context.Context, userID int64) error
 }
 
 type userService struct {
@@ -44,10 +54,13 @@ func (s *userService) GetAllUsers(ctx context.Context) ([]model.User, error) {
 
 func (s *userService) GetUserByID(ctx context.Context, id int64) (model.User, error) {
 	u, err := s.repo.GetUserByID(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return u, ErrUserNotFound
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return u, ErrUserNotFound
+		}
+		return u, fmt.Errorf("service:GetUserByID: %w", err)
 	}
-	return u, err
+	return u, nil
 }
 
 func (s *userService) CreateUser(ctx context.Context, u *model.User) error {
@@ -121,14 +134,60 @@ func (s *userService) DeleteUserByID(ctx context.Context, id int64) error {
 
 func (s *userService) AuthenticateUser(ctx context.Context, email, pwd string) (model.User, error) {
 	u, err := s.repo.GetUserByEmail(ctx, email)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return u, ErrInvalidCredentials
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return model.User{}, ErrInvalidCredentials
+		}
+		return model.User{}, fmt.Errorf("service:AuthenticateUser: %w", err)
 	}
+
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(pwd)); err != nil {
-		return u, ErrInvalidCredentials
+		return model.User{}, ErrInvalidCredentials
 	}
+
 	if !u.IsActive {
-		return u, ErrInactiveAccount
+		return model.User{}, ErrInactiveAccount
 	}
+
 	return u, nil
+}
+
+func (s *userService) GenerateRefreshToken(ctx context.Context, userID int64) (string, time.Time, error) {
+	b := make([]byte, refreshTokenLength)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	token := base64.URLEncoding.EncodeToString(b)
+	expiresAt := time.Now().Add(refreshTokenTTL)
+	rt := &model.RefreshToken{
+		UserID:    userID,
+		Token:     token,
+		ExpiresAt: expiresAt,
+		CreatedAt: time.Now(),
+	}
+	if err := s.repo.InsertRefreshToken(ctx, rt); err != nil {
+		return "", time.Time{}, err
+	}
+	return token, expiresAt, nil
+}
+
+func (s *userService) ValidateRefreshToken(ctx context.Context, token string) (int64, error) {
+	rt, err := s.repo.GetRefreshToken(ctx, token)
+	if err != nil {
+		return 0, ErrInvalidCredentials
+	}
+	if time.Now().After(rt.ExpiresAt) {
+		_ = s.repo.DeleteRefreshToken(ctx, token)
+		return 0, ErrInvalidCredentials
+	}
+	return rt.UserID, nil
+}
+
+func (s *userService) RevokeRefreshToken(ctx context.Context, token string) error {
+	return s.repo.DeleteRefreshToken(ctx, token)
+}
+
+func (s *userService) RevokeAllUserRefreshTokens(ctx context.Context, userID int64) error {
+	return s.repo.DeleteUserRefreshTokens(ctx, userID)
 }

@@ -42,6 +42,20 @@ const (
 	queryDeleteUserByID = `
         DELETE FROM users WHERE id=$1
     `
+	queryInsertRefreshToken = `
+		INSERT INTO refresh_tokens (user_id, token, expires_at, created_at)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`
+	queryGetRefreshToken = `
+		SELECT id, user_id, token, expires_at, created_at FROM refresh_tokens WHERE token=$1
+	`
+	queryDeleteRefreshToken = `
+		DELETE FROM refresh_tokens WHERE token=$1
+	`
+	queryDeleteUserRefreshTokens = `
+		DELETE FROM refresh_tokens WHERE user_id=$1
+	`
 )
 
 type UserRepository interface {
@@ -53,6 +67,13 @@ type UserRepository interface {
 	UpdateUserPassword(ctx context.Context, id int64, hash string) error
 	UpdateUserActiveStatus(ctx context.Context, id int64, isActive bool) error
 	DeleteUserByID(ctx context.Context, id int64) error
+
+	// Transaction support for future complex operations
+	WithTransaction(ctx context.Context, fn func(pgx.Tx) error) error
+	InsertRefreshToken(ctx context.Context, rt *model.RefreshToken) error
+	GetRefreshToken(ctx context.Context, token string) (model.RefreshToken, error)
+	DeleteRefreshToken(ctx context.Context, token string) error
+	DeleteUserRefreshTokens(ctx context.Context, userID int64) error
 }
 
 type userRepo struct {
@@ -61,6 +82,31 @@ type userRepo struct {
 
 func NewUserRepository(pool *pgxpool.Pool) UserRepository {
 	return &userRepo{pool: pool}
+}
+
+// WithTransaction executes a function within a database transaction
+func (r *userRepo) WithTransaction(ctx context.Context, fn func(pgx.Tx) error) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("repo:begin transaction: %w", err)
+	}
+
+	defer func() {
+		if p := recover(); p != nil {
+			// A panic occurred, rollback and re-panic
+			tx.Rollback(ctx)
+			panic(p)
+		} else if err != nil {
+			// Something went wrong, rollback
+			tx.Rollback(ctx)
+		} else {
+			// All good, commit
+			err = tx.Commit(ctx)
+		}
+	}()
+
+	err = fn(tx)
+	return err
 }
 
 func (r *userRepo) GetAllUsers(ctx context.Context) ([]model.User, error) {
@@ -110,9 +156,10 @@ func (r *userRepo) GetUserByEmail(ctx context.Context, email string) (model.User
 		&user.UpdatedAt,
 	)
 
-	if errors.Is(err, pgx.ErrNoRows) {
-		return user, pgx.ErrNoRows
-	} else if err != nil {
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return user, pgx.ErrNoRows
+		}
 		return user, fmt.Errorf("repo:GetUserByEmail: %w", err)
 	}
 	return user, nil
@@ -171,6 +218,43 @@ func (r *userRepo) DeleteUserByID(ctx context.Context, id int64) error {
 	}
 	if cmd.RowsAffected() == 0 {
 		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+func (r *userRepo) InsertRefreshToken(ctx context.Context, rt *model.RefreshToken) error {
+	err := r.pool.QueryRow(ctx, queryInsertRefreshToken, rt.UserID, rt.Token, rt.ExpiresAt, rt.CreatedAt).Scan(&rt.ID)
+	if err != nil {
+		return fmt.Errorf("repo:InsertRefreshToken: %w", err)
+	}
+	return nil
+}
+
+func (r *userRepo) GetRefreshToken(ctx context.Context, token string) (model.RefreshToken, error) {
+	var rt model.RefreshToken
+	err := r.pool.QueryRow(ctx, queryGetRefreshToken, token).Scan(
+		&rt.ID, &rt.UserID, &rt.Token, &rt.ExpiresAt, &rt.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return rt, pgx.ErrNoRows
+	} else if err != nil {
+		return rt, fmt.Errorf("repo:GetRefreshToken: %w", err)
+	}
+	return rt, nil
+}
+
+func (r *userRepo) DeleteRefreshToken(ctx context.Context, token string) error {
+	_, err := r.pool.Exec(ctx, queryDeleteRefreshToken, token)
+	if err != nil {
+		return fmt.Errorf("repo:DeleteRefreshToken: %w", err)
+	}
+	return nil
+}
+
+func (r *userRepo) DeleteUserRefreshTokens(ctx context.Context, userID int64) error {
+	_, err := r.pool.Exec(ctx, queryDeleteUserRefreshTokens, userID)
+	if err != nil {
+		return fmt.Errorf("repo:DeleteUserRefreshTokens: %w", err)
 	}
 	return nil
 }

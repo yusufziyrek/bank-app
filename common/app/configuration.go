@@ -12,8 +12,10 @@ import (
 type ConfigurationManager struct {
 	PostgreSqlConfig postgresql.Config
 	AppPort          string
+	AppEnv           string
 	JwtSecret        string
 	JwtTTL           int
+	AllowedOrigins   string
 }
 
 func NewConfigurationManager() *ConfigurationManager {
@@ -24,7 +26,7 @@ func NewConfigurationManager() *ConfigurationManager {
 
 	port := os.Getenv("PG_PORT")
 	if port == "" {
-		port = "5432"
+		port = "6432"
 	}
 
 	user := os.Getenv("PG_USER")
@@ -65,6 +67,11 @@ func NewConfigurationManager() *ConfigurationManager {
 		appPort = "8080"
 	}
 
+	appEnv := os.Getenv("APP_ENV")
+	if appEnv == "" {
+		appEnv = "development"
+	}
+
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
 		jwtSecret = "change-me"
@@ -73,8 +80,16 @@ func NewConfigurationManager() *ConfigurationManager {
 	jwtTTLStr := os.Getenv("JWT_TTL")
 	jwtTTL, err := strconv.Atoi(jwtTTLStr)
 	if err != nil || jwtTTL <= 0 {
-		jwtTTL = 60
+		jwtTTL = 60 // Default 60 minutes
 	}
+
+	allowedOrigins := os.Getenv("ALLOWED_ORIGINS")
+	if allowedOrigins == "" {
+		allowedOrigins = "http://localhost:3000,https://yourdomain.com"
+	}
+
+	// Debug log'ları ekle
+	log.Printf("PostgreSQL Config - Host: %s, Port: %s, User: %s, DB: %s", host, port, user, db)
 
 	return &ConfigurationManager{
 		PostgreSqlConfig: postgresql.Config{
@@ -86,8 +101,10 @@ func NewConfigurationManager() *ConfigurationManager {
 			MaxConnections:        int32(maxConns),
 			MaxConnectionIdleTime: time.Duration(idleSec) * time.Second,
 		},
-		AppPort:   appPort,
-		JwtSecret: jwtSecret,
-		JwtTTL:    jwtTTL,
+		AppPort:        appPort,
+		AppEnv:         appEnv,
+		JwtSecret:      jwtSecret,
+		JwtTTL:         jwtTTL,
+		AllowedOrigins: allowedOrigins,
 	}
 }

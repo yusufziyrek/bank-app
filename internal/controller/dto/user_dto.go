@@ -1,14 +1,15 @@
 package dto
 
 import (
-	"github.com/yusufziyrek/bank-app/internal/model"
 	"time"
+
+	"github.com/yusufziyrek/bank-app/internal/model"
 )
 
 type CreateUserRequest struct {
-	FullName string `json:"full_name" validate:"required"`
-	Email    string `json:"email" validate:"required,email"`
-	Password string `json:"password" validate:"required,min=8"`
+	FullName string `json:"full_name" validate:"required,min=2,max=100"`
+	Email    string `json:"email" validate:"required,email,max=255"`
+	Password string `json:"password" validate:"required,min=8,max=100"`
 }
 
 type LoginRequest struct {
@@ -17,15 +18,15 @@ type LoginRequest struct {
 }
 
 type UpdateUserEmailRequest struct {
-	NewEmail string `json:"new_email" validate:"required,email"`
+	NewEmail string `json:"new_email" validate:"required,email,max=255"`
 }
 
 type UpdateUserPasswordRequest struct {
-	NewPassword string `json:"new_password" validate:"required,min=8"`
+	NewPassword string `json:"new_password" validate:"required,min=8,max=100"`
 }
 
 type UpdateUserStatusRequest struct {
-	IsActive bool `json:"is_active"`
+	IsActive bool `json:"is_active" validate:"required"`
 }
 
 type UserResponse struct {
@@ -44,9 +45,20 @@ type UsersResponse struct {
 }
 
 type AuthResponse struct {
-	Token     string       `json:"token"`
-	ExpiresAt time.Time    `json:"expires_at"`
-	User      UserResponse `json:"user"`
+	Token        string       `json:"token"`
+	ExpiresAt    time.Time    `json:"expires_at"`
+	RefreshToken string       `json:"refresh_token"`
+	RefreshExp   time.Time    `json:"refresh_expires_at"`
+	User         UserResponse `json:"user"`
+}
+
+type RefreshRequest struct {
+	RefreshToken string `json:"refresh_token" validate:"required"`
+}
+
+type RefreshResponse struct {
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 func UserResponseFromModel(u model.User) UserResponse {

@@ -1,9 +1,7 @@
 package controller
 
 import (
-	"context"
 	"net/http"
-	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/yusufziyrek/bank-app/internal/controller/dto"
@@ -19,13 +17,14 @@ func NewUserController(svc service.UserService) *UserController {
 }
 
 func (u *UserController) GetAll(c echo.Context) error {
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
 	users, err := u.svc.GetAllUsers(ctx)
 	if err != nil {
-		return sendError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not fetch users", err.Error())
+		return handleServiceError(c, err, "fetch users")
 	}
+
 	resp := dto.UsersResponse{
 		Users: make([]dto.UserResponse, len(users)),
 		Count: len(users),
@@ -41,18 +40,16 @@ func (u *UserController) GetByID(c echo.Context) error {
 	if herr != nil {
 		return c.JSON(herr.Code, herr.Message)
 	}
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+
+	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
 	user, err := u.svc.GetUserByID(ctx, id)
-	switch err {
-	case service.ErrUserNotFound:
-		return sendError(c, http.StatusNotFound, "USER_NOT_FOUND", err.Error(), "")
-	case nil:
-		return c.JSON(http.StatusOK, dto.UserResponseFromModel(user))
-	default:
-		return sendError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not fetch user", err.Error())
+	if err != nil {
+		return handleServiceError(c, err, "fetch user")
 	}
+
+	return c.JSON(http.StatusOK, dto.UserResponseFromModel(user))
 }
 
 func (u *UserController) UpdateEmail(c echo.Context) error {
@@ -60,27 +57,19 @@ func (u *UserController) UpdateEmail(c echo.Context) error {
 	if herr != nil {
 		return c.JSON(herr.Code, herr.Message)
 	}
+
 	var req dto.UpdateUserEmailRequest
-	if err := c.Bind(&req); err != nil {
-		return sendError(c, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON", err.Error())
-	}
-	if err := c.Validate(&req); err != nil {
+	if err := bindAndValidate(c, &req); err != nil {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
 	if err := u.svc.UpdateUserEmail(ctx, id, req.NewEmail); err != nil {
-		switch err {
-		case service.ErrUserNotFound:
-			return sendError(c, http.StatusNotFound, "USER_NOT_FOUND", err.Error(), "")
-		case service.ErrEmailAlreadyRegistered:
-			return sendError(c, http.StatusConflict, "EMAIL_EXISTS", err.Error(), "")
-		default:
-			return sendError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not update email", err.Error())
-		}
+		return handleServiceError(c, err, "update email")
 	}
+
 	return c.NoContent(http.StatusNoContent)
 }
 
@@ -89,23 +78,19 @@ func (u *UserController) UpdatePassword(c echo.Context) error {
 	if herr != nil {
 		return c.JSON(herr.Code, herr.Message)
 	}
+
 	var req dto.UpdateUserPasswordRequest
-	if err := c.Bind(&req); err != nil {
-		return sendError(c, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON", err.Error())
-	}
-	if err := c.Validate(&req); err != nil {
+	if err := bindAndValidate(c, &req); err != nil {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
 	if err := u.svc.UpdateUserPassword(ctx, id, req.NewPassword); err != nil {
-		if err == service.ErrUserNotFound {
-			return sendError(c, http.StatusNotFound, "USER_NOT_FOUND", err.Error(), "")
-		}
-		return sendError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not update password", err.Error())
+		return handleServiceError(c, err, "update password")
 	}
+
 	return c.NoContent(http.StatusNoContent)
 }
 
@@ -114,20 +99,19 @@ func (u *UserController) UpdateStatus(c echo.Context) error {
 	if herr != nil {
 		return c.JSON(herr.Code, herr.Message)
 	}
+
 	var req dto.UpdateUserStatusRequest
-	if err := c.Bind(&req); err != nil {
-		return sendError(c, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON", err.Error())
+	if err := bindAndValidate(c, &req); err != nil {
+		return err
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
 	if err := u.svc.UpdateUserActiveStatus(ctx, id, req.IsActive); err != nil {
-		if err == service.ErrUserNotFound {
-			return sendError(c, http.StatusNotFound, "USER_NOT_FOUND", err.Error(), "")
-		}
-		return sendError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not update status", err.Error())
+		return handleServiceError(c, err, "update status")
 	}
+
 	return c.NoContent(http.StatusNoContent)
 }
 
@@ -137,14 +121,12 @@ func (u *UserController) DeleteByID(c echo.Context) error {
 		return c.JSON(herr.Code, herr.Message)
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request().Context(), 5*time.Second)
+	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
 	if err := u.svc.DeleteUserByID(ctx, id); err != nil {
-		if err == service.ErrUserNotFound {
-			return sendError(c, http.StatusNotFound, "USER_NOT_FOUND", err.Error(), "")
-		}
-		return sendError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Could not delete user", err.Error())
+		return handleServiceError(c, err, "delete user")
 	}
+
 	return c.NoContent(http.StatusNoContent)
 }

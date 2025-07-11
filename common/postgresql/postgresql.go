@@ -20,7 +20,7 @@ type Config struct {
 
 func GetConnectionPool(ctx context.Context, cfg Config) (*pgxpool.Pool, error) {
 	connString := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable pool_max_conns=%d pool_max_conn_idle_time=%s",
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable pool_max_conns=%d pool_max_conn_idle_time=%s connect_timeout=10",
 		cfg.Host, cfg.Port, cfg.UserName, cfg.Password, cfg.DbName,
 		cfg.MaxConnections, cfg.MaxConnectionIdleTime,
 	)

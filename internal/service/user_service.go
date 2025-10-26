@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgconn"
 	"github.com/jackc/pgx/v5"
+	"github.com/redis/go-redis/v9"
 	"github.com/yusufziyrek/bank-app/internal/model"
 	"github.com/yusufziyrek/bank-app/internal/repository"
 	"golang.org/x/crypto/bcrypt"
@@ -17,6 +19,7 @@ import (
 
 const refreshTokenLength = 64
 const refreshTokenTTL = 7 * 24 * time.Hour // 7 gün
+const redisOpTimeout = 300 * time.Millisecond
 
 type UserService interface {
 	GetAllUsers(ctx context.Context) ([]model.User, error)
@@ -34,11 +37,72 @@ type UserService interface {
 }
 
 type userService struct {
-	repo repository.UserRepository
+	repo     repository.UserRepository
+	cache    *redis.Client
+	cacheTTL time.Duration
 }
 
 func NewUserService(r repository.UserRepository) UserService {
-	return &userService{repo: r}
+	return newUserService(r, nil, 0)
+}
+
+func NewUserServiceWithCache(r repository.UserRepository, cache *redis.Client, ttl time.Duration) UserService {
+	return newUserService(r, cache, ttl)
+}
+
+func newUserService(r repository.UserRepository, cache *redis.Client, ttl time.Duration) UserService {
+	service := &userService{repo: r, cache: cache}
+	if cache != nil {
+		if ttl <= 0 {
+			ttl = 5 * time.Minute
+		}
+		service.cacheTTL = ttl
+	}
+	return service
+}
+
+func (s *userService) cacheKey(id int64) string {
+	return fmt.Sprintf("user:%d", id)
+}
+
+func (s *userService) getUserFromCache(ctx context.Context, key string) (model.User, bool) {
+	if s.cache == nil {
+		return model.User{}, false
+	}
+	cacheCtx, cancel := context.WithTimeout(ctx, redisOpTimeout)
+	defer cancel()
+
+	data, err := s.cache.Get(cacheCtx, key).Result()
+	if err != nil {
+		return model.User{}, false
+	}
+	var user model.User
+	if err := json.Unmarshal([]byte(data), &user); err != nil {
+		return model.User{}, false
+	}
+	return user, true
+}
+
+func (s *userService) setUserCache(ctx context.Context, key string, user model.User) {
+	if s.cache == nil {
+		return
+	}
+	payload, err := json.Marshal(user)
+	if err != nil {
+		return
+	}
+	cacheCtx, cancel := context.WithTimeout(context.Background(), redisOpTimeout)
+	defer cancel()
+	_ = s.cache.Set(cacheCtx, key, payload, s.cacheTTL).Err()
+}
+
+func (s *userService) invalidateUserCache(ctx context.Context, id int64) {
+	if s.cache == nil {
+		return
+	}
+	cacheCtx, cancel := context.WithTimeout(context.Background(), redisOpTimeout)
+	defer cancel()
+	_ = s.cache.Del(cacheCtx, s.cacheKey(id)).Err()
 }
 
 func (s *userService) GetAllUsers(ctx context.Context) ([]model.User, error) {
@@ -46,6 +110,10 @@ func (s *userService) GetAllUsers(ctx context.Context) ([]model.User, error) {
 }
 
 func (s *userService) GetUserByID(ctx context.Context, id int64) (model.User, error) {
+	if cached, ok := s.getUserFromCache(ctx, s.cacheKey(id)); ok {
+		return cached, nil
+	}
+
 	u, err := s.repo.GetUserByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -53,6 +121,7 @@ func (s *userService) GetUserByID(ctx context.Context, id int64) (model.User, er
 		}
 		return u, fmt.Errorf("service:GetUserByID: %w", err)
 	}
+	s.setUserCache(ctx, s.cacheKey(id), u)
 	return u, nil
 }
 
@@ -74,6 +143,7 @@ func (s *userService) CreateUser(ctx context.Context, u *model.User) error {
 		}
 		return fmt.Errorf("service:AddUser: %w", err)
 	}
+	s.invalidateUserCache(ctx, u.ID)
 	return nil
 }
 
@@ -88,6 +158,7 @@ func (s *userService) UpdateUserEmail(ctx context.Context, id int64, email strin
 		}
 		return fmt.Errorf("service:UpdateEmail: %w", err)
 	}
+	s.invalidateUserCache(ctx, id)
 	return nil
 }
 
@@ -102,6 +173,7 @@ func (s *userService) UpdateUserPassword(ctx context.Context, id int64, pwd stri
 		}
 		return fmt.Errorf("service:UpdatePwd: %w", err)
 	}
+	s.invalidateUserCache(ctx, id)
 	return nil
 }
 
@@ -112,6 +184,7 @@ func (s *userService) UpdateUserActiveStatus(ctx context.Context, id int64, acti
 		}
 		return fmt.Errorf("service:UpdateStatus: %w", err)
 	}
+	s.invalidateUserCache(ctx, id)
 	return nil
 }
 
@@ -122,6 +195,7 @@ func (s *userService) DeleteUserByID(ctx context.Context, id int64) error {
 		}
 		return fmt.Errorf("service:DeleteUser: %w", err)
 	}
+	s.invalidateUserCache(ctx, id)
 	return nil
 }
 

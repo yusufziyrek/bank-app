@@ -30,6 +30,9 @@ BankApp-RestAPI is a secure, high-performance backend service written in Go that
 
   * Spin up PostgreSQL via script
   * Automated schema initialization
+* **Caching Layer:**
+
+  * Optional Redis-backed user profile cache
 
 ---
 
@@ -39,6 +42,7 @@ BankApp-RestAPI is a secure, high-performance backend service written in Go that
 * **Echo Framework** for HTTP routing and middleware
 * **JWT** (`github.com/golang-jwt/jwt`) for token handling
 * **PostgreSQL** as the relational database
+* **Redis** for caching frequently fetched data
 * **Docker & Shell Scripts** for containerized setup
 * **Makefile** (optional) for automation
 
@@ -200,7 +204,15 @@ BankApp-RestAPI is a secure, high-performance backend service written in Go that
   ```
 
   > **Note:** Do not use real production passwords or secrets in this script. The example uses only dummy values. Always edit the script for your own local environment.
-4. **Install & Run:**
+4. **(Optional) Start Redis cache:**
+
+  ```bash
+  docker run --name redis-local -p 6379:6379 -d redis:8.2.2
+  ```
+
+  > Add `REDIS_ADDR=localhost:6379` to `.env`, plus `REDIS_PASSWORD` and `REDIS_DB=0` if needed. When Redis is offline the app transparently falls back to PostgreSQL only.
+
+5. **Install & Run:**
 
    ```bash
    go mod tidy
@@ -216,6 +228,6 @@ BankApp-RestAPI is a secure, high-performance backend service written in Go that
 * **Two-Factor Authentication (2FA).**
 * **Rate Limiting** on critical endpoints.
 * **Swagger/OpenAPI** auto-docs.
-* **In-Memory Cache** (e.g., Redis) for hot lookups.
+* **Cache invalidation:** extend strategies (e.g., list endpoints, multi-tenant scenarios).
 
 For full source and contributions, see the [GitHub repository](https://github.com/yusufziyrek/bank-app).

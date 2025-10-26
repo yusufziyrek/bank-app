@@ -16,6 +16,9 @@ type ConfigurationManager struct {
 	JwtSecret        string
 	JwtTTL           int
 	AllowedOrigins   string
+	RedisAddr        string
+	RedisPassword    string
+	RedisDB          int
 }
 
 func NewConfigurationManager() *ConfigurationManager {
@@ -88,6 +91,23 @@ func NewConfigurationManager() *ConfigurationManager {
 		allowedOrigins = "http://localhost:5173"
 	}
 
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = "localhost:6379"
+	}
+
+	redisPassword := os.Getenv("REDIS_PASSWORD")
+
+	redisDBStr := os.Getenv("REDIS_DB")
+	redisDB := 0
+	if redisDBStr != "" {
+		parsed, err := strconv.Atoi(redisDBStr)
+		if err != nil {
+			log.Fatalf("Geçersiz REDIS_DB: %v", err)
+		}
+		redisDB = parsed
+	}
+
 	log.Printf("PostgreSQL Config - Host: %s, Port: %s, User: %s, DB: %s", host, port, user, db)
 
 	return &ConfigurationManager{
@@ -105,5 +125,8 @@ func NewConfigurationManager() *ConfigurationManager {
 		JwtSecret:      jwtSecret,
 		JwtTTL:         jwtTTL,
 		AllowedOrigins: allowedOrigins,
+		RedisAddr:      redisAddr,
+		RedisPassword:  redisPassword,
+		RedisDB:        redisDB,
 	}
 }

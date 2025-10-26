@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 
 	"github.com/yusufziyrek/bank-app/common/app"
+	"github.com/yusufziyrek/bank-app/common/cache"
 	"github.com/yusufziyrek/bank-app/common/postgresql"
 	"github.com/yusufziyrek/bank-app/internal/repository"
 	"github.com/yusufziyrek/bank-app/internal/routes"
@@ -112,6 +113,15 @@ func main() {
 
 	repo := repository.NewUserRepository(pool)
 	svc := service.NewUserService(repo)
+	if cfg.RedisAddr != "" {
+		client, cerr := cache.NewRedisClient(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
+		if cerr != nil {
+			log.Printf("Redis bağlanılamadı: %v", cerr)
+		} else {
+			defer client.Close()
+			svc = service.NewUserServiceWithCache(repo, client, 5*time.Minute)
+		}
+	}
 
 	accountRepo := repository.NewAccountRepository(pool)
 	accountSvc := service.NewAccountService(accountRepo)

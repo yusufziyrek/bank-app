@@ -27,8 +27,8 @@ func NewAuthController(svc service.UserService, jwtSecret string, jwtTTL time.Du
 
 func (a *AuthController) Register(c echo.Context) error {
 	var req dto.CreateUserRequest
-	if err := bindAndValidate(c, &req); err != nil {
-		return err
+	if ok := bindAndValidate(c, &req); !ok {
+		return nil
 	}
 
 	user := model.User{FullName: req.FullName, Email: req.Email, PasswordHash: req.Password}
@@ -54,8 +54,8 @@ func (a *AuthController) Register(c echo.Context) error {
 
 func (a *AuthController) Login(c echo.Context) error {
 	var req dto.LoginRequest
-	if err := bindAndValidate(c, &req); err != nil {
-		return err
+	if ok := bindAndValidate(c, &req); !ok {
+		return nil
 	}
 
 	user, err := a.svc.AuthenticateUser(c.Request().Context(), req.Email, req.Password)
@@ -81,8 +81,8 @@ func (a *AuthController) Login(c echo.Context) error {
 
 func (a *AuthController) Refresh(c echo.Context) error {
 	var req dto.RefreshRequest
-	if err := bindAndValidate(c, &req); err != nil {
-		return err
+	if ok := bindAndValidate(c, &req); !ok {
+		return nil
 	}
 	userID, err := a.svc.ValidateRefreshToken(c.Request().Context(), req.RefreshToken)
 	if err != nil {

@@ -78,8 +78,8 @@ func (u *UserController) UpdateEmail(c echo.Context) error {
 		return sendError(c, http.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated", err.Error())
 	}
 	var req dto.UpdateUserEmailRequest
-	if err := bindAndValidate(c, &req); err != nil {
-		return err
+	if ok := bindAndValidate(c, &req); !ok {
+		return nil
 	}
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
@@ -97,8 +97,8 @@ func (u *UserController) UpdatePassword(c echo.Context) error {
 		return sendError(c, http.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated", err.Error())
 	}
 	var req dto.UpdateUserPasswordRequest
-	if err := bindAndValidate(c, &req); err != nil {
-		return err
+	if ok := bindAndValidate(c, &req); !ok {
+		return nil
 	}
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
@@ -116,8 +116,8 @@ func (u *UserController) UpdateStatus(c echo.Context) error {
 		return sendError(c, http.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated", err.Error())
 	}
 	var req dto.UpdateUserStatusRequest
-	if err := bindAndValidate(c, &req); err != nil {
-		return err
+	if ok := bindAndValidate(c, &req); !ok {
+		return nil
 	}
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()

@@ -126,8 +126,8 @@ func (a *AccountController) Create(c echo.Context) error {
 		return sendError(c, http.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated", err.Error())
 	}
 	var req dto.CreateAccountRequest
-	if err := bindAndValidate(c, &req); err != nil {
-		return err
+	if ok := bindAndValidate(c, &req); !ok {
+		return nil
 	}
 
 	ctx, cancel := withTimeout(c.Request().Context())
@@ -159,8 +159,8 @@ func (a *AccountController) Update(c echo.Context) error {
 	}
 
 	var req dto.UpdateAccountRequest
-	if err := bindAndValidate(c, &req); err != nil {
-		return err
+	if ok := bindAndValidate(c, &req); !ok {
+		return nil
 	}
 
 	ctx, cancel := withTimeout(c.Request().Context())

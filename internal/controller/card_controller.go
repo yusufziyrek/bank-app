@@ -72,8 +72,8 @@ func (cc *CardController) Create(c echo.Context) error {
 	}
 
 	var req dto.CreateCardRequest
-	if err := bindAndValidate(c, &req); err != nil {
-		return err
+	if ok := bindAndValidate(c, &req); !ok {
+		return nil
 	}
 
 	ctx, cancel := withTimeout(c.Request().Context())
@@ -111,8 +111,8 @@ func (cc *CardController) Update(c echo.Context) error {
 	}
 
 	var req dto.UpdateCardRequest
-	if err := bindAndValidate(c, &req); err != nil {
-		return err
+	if ok := bindAndValidate(c, &req); !ok {
+		return nil
 	}
 
 	updated := model.Card{ID: id}
@@ -143,8 +143,8 @@ func (cc *CardController) UpdateStatus(c echo.Context) error {
 	}
 
 	var req dto.UpdateCardStatusRequest
-	if err := bindAndValidate(c, &req); err != nil {
-		return err
+	if ok := bindAndValidate(c, &req); !ok {
+		return nil
 	}
 
 	ctx, cancel := withTimeout(c.Request().Context())

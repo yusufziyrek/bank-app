@@ -94,8 +94,8 @@ func (t *TransactionController) Create(c echo.Context) error {
 		return sendError(c, http.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated", err.Error())
 	}
 	var req dto.CreateTransactionRequest
-	if err := bindAndValidate(c, &req); err != nil {
-		return err
+	if ok := bindAndValidate(c, &req); !ok {
+		return nil
 	}
 
 	ctx, cancel := withTimeout(c.Request().Context())
@@ -148,8 +148,8 @@ func (t *TransactionController) Update(c echo.Context) error {
 	}
 
 	var req dto.UpdateTransactionRequest
-	if err := bindAndValidate(c, &req); err != nil {
-		return err
+	if ok := bindAndValidate(c, &req); !ok {
+		return nil
 	}
 
 	ctx, cancel := withTimeout(c.Request().Context())

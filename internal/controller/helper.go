@@ -99,9 +99,10 @@ func handleServiceError(c echo.Context, err error, operation string) error {
 	}
 }
 
-func bindAndValidate(c echo.Context, req interface{}) error {
+func bindAndValidate(c echo.Context, req interface{}) bool {
 	if err := c.Bind(req); err != nil {
-		return sendError(c, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON", err.Error())
+		sendError(c, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON", err.Error())
+		return false
 	}
 	if err := c.Validate(req); err != nil {
 		if validationErrors, ok := err.(validator.ValidationErrors); ok {
@@ -113,11 +114,13 @@ func bindAndValidate(c echo.Context, req interface{}) error {
 					Value: fieldError.Param(),
 				})
 			}
-			return sendValidationError(c, errors)
+			sendValidationError(c, errors)
+			return false
 		}
-		return sendError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Validation failed", err.Error())
+		sendError(c, http.StatusBadRequest, "VALIDATION_ERROR", "Validation failed", err.Error())
+		return false
 	}
-	return nil
+	return true
 }
 
 func getUserIDFromToken(c echo.Context) (int64, error) {

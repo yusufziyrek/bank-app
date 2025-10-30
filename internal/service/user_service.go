@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgconn"
@@ -20,6 +21,43 @@ import (
 const refreshTokenLength = 64
 const refreshTokenTTL = 7 * 24 * time.Hour // 7 gün
 const redisOpTimeout = 300 * time.Millisecond
+
+type cachedUser struct {
+	ID           int64     `json:"id"`
+	FullName     string    `json:"full_name"`
+	Email        string    `json:"email"`
+	PasswordHash string    `json:"password_hash"`
+	Role         string    `json:"role"`
+	IsActive     bool      `json:"is_active"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+func cachedFromModel(u model.User) cachedUser {
+	return cachedUser{
+		ID:           u.ID,
+		FullName:     u.FullName,
+		Email:        u.Email,
+		PasswordHash: u.PasswordHash,
+		Role:         u.Role,
+		IsActive:     u.IsActive,
+		CreatedAt:    u.CreatedAt,
+		UpdatedAt:    u.UpdatedAt,
+	}
+}
+
+func (c cachedUser) toModel() model.User {
+	return model.User{
+		ID:           c.ID,
+		FullName:     c.FullName,
+		Email:        c.Email,
+		PasswordHash: c.PasswordHash,
+		Role:         c.Role,
+		IsActive:     c.IsActive,
+		CreatedAt:    c.CreatedAt,
+		UpdatedAt:    c.UpdatedAt,
+	}
+}
 
 type UserService interface {
 	GetAllUsers(ctx context.Context) ([]model.User, error)
@@ -62,7 +100,11 @@ func newUserService(r repository.UserRepository, cache *redis.Client, ttl time.D
 }
 
 func (s *userService) cacheKey(id int64) string {
-	return fmt.Sprintf("user:%d", id)
+	return fmt.Sprintf("user:id:%d", id)
+}
+
+func (s *userService) cacheKeyEmail(email string) string {
+	return fmt.Sprintf("user:email:%s", strings.ToLower(email))
 }
 
 func (s *userService) getUserFromCache(ctx context.Context, key string) (model.User, bool) {
@@ -76,24 +118,30 @@ func (s *userService) getUserFromCache(ctx context.Context, key string) (model.U
 	if err != nil {
 		return model.User{}, false
 	}
-	var user model.User
-	if err := json.Unmarshal([]byte(data), &user); err != nil {
+	var cached cachedUser
+	if err := json.Unmarshal([]byte(data), &cached); err != nil {
 		return model.User{}, false
 	}
-	return user, true
+	return cached.toModel(), cached.PasswordHash != ""
 }
 
-func (s *userService) setUserCache(ctx context.Context, key string, user model.User) {
-	if s.cache == nil {
+func (s *userService) setUserCache(user model.User) {
+	if s.cache == nil || user.ID == 0 {
 		return
 	}
-	payload, err := json.Marshal(user)
+	payload, err := json.Marshal(cachedFromModel(user))
 	if err != nil {
 		return
 	}
 	cacheCtx, cancel := context.WithTimeout(context.Background(), redisOpTimeout)
 	defer cancel()
-	_ = s.cache.Set(cacheCtx, key, payload, s.cacheTTL).Err()
+	keys := []string{s.cacheKey(user.ID)}
+	if user.Email != "" {
+		keys = append(keys, s.cacheKeyEmail(user.Email))
+	}
+	for _, key := range keys {
+		_ = s.cache.Set(cacheCtx, key, payload, s.cacheTTL).Err()
+	}
 }
 
 func (s *userService) invalidateUserCache(ctx context.Context, id int64) {
@@ -102,7 +150,27 @@ func (s *userService) invalidateUserCache(ctx context.Context, id int64) {
 	}
 	cacheCtx, cancel := context.WithTimeout(context.Background(), redisOpTimeout)
 	defer cancel()
-	_ = s.cache.Del(cacheCtx, s.cacheKey(id)).Err()
+	key := s.cacheKey(id)
+	var emailKey string
+	if data, err := s.cache.Get(cacheCtx, key).Result(); err == nil {
+		var cached cachedUser
+		if json.Unmarshal([]byte(data), &cached) == nil && cached.Email != "" {
+			emailKey = s.cacheKeyEmail(cached.Email)
+		}
+	}
+	_ = s.cache.Del(cacheCtx, key).Err()
+	if emailKey != "" {
+		_ = s.cache.Del(cacheCtx, emailKey).Err()
+	}
+}
+
+func (s *userService) invalidateUserEmailCache(email string) {
+	if s.cache == nil || email == "" {
+		return
+	}
+	cacheCtx, cancel := context.WithTimeout(context.Background(), redisOpTimeout)
+	defer cancel()
+	_ = s.cache.Del(cacheCtx, s.cacheKeyEmail(email)).Err()
 }
 
 func (s *userService) GetAllUsers(ctx context.Context) ([]model.User, error) {
@@ -121,7 +189,7 @@ func (s *userService) GetUserByID(ctx context.Context, id int64) (model.User, er
 		}
 		return u, fmt.Errorf("service:GetUserByID: %w", err)
 	}
-	s.setUserCache(ctx, s.cacheKey(id), u)
+	s.setUserCache(u)
 	return u, nil
 }
 
@@ -143,11 +211,19 @@ func (s *userService) CreateUser(ctx context.Context, u *model.User) error {
 		}
 		return fmt.Errorf("service:AddUser: %w", err)
 	}
-	s.invalidateUserCache(ctx, u.ID)
+	s.setUserCache(*u)
 	return nil
 }
 
 func (s *userService) UpdateUserEmail(ctx context.Context, id int64, email string) error {
+	existing, err := s.repo.GetUserByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrUserNotFound
+		}
+		return fmt.Errorf("service:UpdateEmail:get: %w", err)
+	}
+
 	if err := s.repo.UpdateUserEmail(ctx, id, email); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrUserNotFound
@@ -158,11 +234,22 @@ func (s *userService) UpdateUserEmail(ctx context.Context, id int64, email strin
 		}
 		return fmt.Errorf("service:UpdateEmail: %w", err)
 	}
+
 	s.invalidateUserCache(ctx, id)
+	s.invalidateUserEmailCache(existing.Email)
+	s.invalidateUserEmailCache(email)
 	return nil
 }
 
 func (s *userService) UpdateUserPassword(ctx context.Context, id int64, pwd string) error {
+	existing, err := s.repo.GetUserByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrUserNotFound
+		}
+		return fmt.Errorf("service:UpdatePwd:get: %w", err)
+	}
+
 	hashed, err := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("service:hashPwd: %w", err)
@@ -174,10 +261,19 @@ func (s *userService) UpdateUserPassword(ctx context.Context, id int64, pwd stri
 		return fmt.Errorf("service:UpdatePwd: %w", err)
 	}
 	s.invalidateUserCache(ctx, id)
+	s.invalidateUserEmailCache(existing.Email)
 	return nil
 }
 
 func (s *userService) UpdateUserActiveStatus(ctx context.Context, id int64, active bool) error {
+	existing, err := s.repo.GetUserByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrUserNotFound
+		}
+		return fmt.Errorf("service:UpdateStatus:get: %w", err)
+	}
+
 	if err := s.repo.UpdateUserActiveStatus(ctx, id, active); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrUserNotFound
@@ -185,10 +281,19 @@ func (s *userService) UpdateUserActiveStatus(ctx context.Context, id int64, acti
 		return fmt.Errorf("service:UpdateStatus: %w", err)
 	}
 	s.invalidateUserCache(ctx, id)
+	s.invalidateUserEmailCache(existing.Email)
 	return nil
 }
 
 func (s *userService) DeleteUserByID(ctx context.Context, id int64) error {
+	existing, err := s.repo.GetUserByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrUserNotFound
+		}
+		return fmt.Errorf("service:DeleteUser:get: %w", err)
+	}
+
 	if err := s.repo.DeleteUserByID(ctx, id); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrUserNotFound
@@ -196,10 +301,21 @@ func (s *userService) DeleteUserByID(ctx context.Context, id int64) error {
 		return fmt.Errorf("service:DeleteUser: %w", err)
 	}
 	s.invalidateUserCache(ctx, id)
+	s.invalidateUserEmailCache(existing.Email)
 	return nil
 }
 
 func (s *userService) AuthenticateUser(ctx context.Context, email, pwd string) (model.User, error) {
+	if cached, ok := s.getUserFromCache(ctx, s.cacheKeyEmail(email)); ok {
+		if err := bcrypt.CompareHashAndPassword([]byte(cached.PasswordHash), []byte(pwd)); err != nil {
+			return model.User{}, ErrInvalidCredentials
+		}
+		if !cached.IsActive {
+			return model.User{}, ErrInactiveAccount
+		}
+		return cached, nil
+	}
+
 	u, err := s.repo.GetUserByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -216,6 +332,7 @@ func (s *userService) AuthenticateUser(ctx context.Context, email, pwd string) (
 		return model.User{}, ErrInactiveAccount
 	}
 
+	s.setUserCache(u)
 	return u, nil
 }
 

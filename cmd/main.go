@@ -112,7 +112,11 @@ func main() {
 	e.Use(middleware.CORSWithConfig(getCORSConfig(cfg)))
 
 	repo := repository.NewUserRepository(pool)
+	accountRepo := repository.NewAccountRepository(pool)
+
 	svc := service.NewUserService(repo)
+	accountSvc := service.NewAccountService(accountRepo)
+
 	if cfg.RedisAddr != "" {
 		client, cerr := cache.NewRedisClient(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
 		if cerr != nil {
@@ -120,11 +124,9 @@ func main() {
 		} else {
 			defer client.Close()
 			svc = service.NewUserServiceWithCache(repo, client, 5*time.Minute)
+			accountSvc = service.NewAccountServiceWithCache(accountRepo, client, 5*time.Minute)
 		}
 	}
-
-	accountRepo := repository.NewAccountRepository(pool)
-	accountSvc := service.NewAccountService(accountRepo)
 
 	transactionRepo := repository.NewTransactionRepository(pool)
 	transactionSvc := service.NewTransactionService(transactionRepo, accountRepo)

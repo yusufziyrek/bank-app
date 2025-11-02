@@ -10,15 +10,16 @@ import (
 )
 
 type ConfigurationManager struct {
-	PostgreSqlConfig postgresql.Config
-	AppPort          string
-	AppEnv           string
-	JwtSecret        string
-	JwtTTL           int
-	AllowedOrigins   string
-	RedisAddr        string
-	RedisPassword    string
-	RedisDB          int
+	PostgreSqlConfig  postgresql.Config
+	AppPort           string
+	AppEnv            string
+	JwtSecret         string
+	JwtTTL            int
+	AllowedOrigins    string
+	RedisAddr         string
+	RedisPassword     string
+	RedisDB           int
+	CardEncryptionKey string
 }
 
 func NewConfigurationManager() *ConfigurationManager {
@@ -108,6 +109,12 @@ func NewConfigurationManager() *ConfigurationManager {
 		redisDB = parsed
 	}
 
+	cardEncryptionKey := os.Getenv("CARD_ENCRYPTION_KEY")
+	if cardEncryptionKey == "" {
+		cardEncryptionKey = "development-card-key"
+		log.Printf("Warning: CARD_ENCRYPTION_KEY belirtilmedi, varsayılan geliştirme anahtarı kullanılacak")
+	}
+
 	log.Printf("PostgreSQL Config - Host: %s, Port: %s, User: %s, DB: %s", host, port, user, db)
 
 	return &ConfigurationManager{
@@ -120,13 +127,14 @@ func NewConfigurationManager() *ConfigurationManager {
 			MaxConnections:        int32(maxConns),
 			MaxConnectionIdleTime: time.Duration(idleSec) * time.Second,
 		},
-		AppPort:        appPort,
-		AppEnv:         appEnv,
-		JwtSecret:      jwtSecret,
-		JwtTTL:         jwtTTL,
-		AllowedOrigins: allowedOrigins,
-		RedisAddr:      redisAddr,
-		RedisPassword:  redisPassword,
-		RedisDB:        redisDB,
+		AppPort:           appPort,
+		AppEnv:            appEnv,
+		JwtSecret:         jwtSecret,
+		JwtTTL:            jwtTTL,
+		AllowedOrigins:    allowedOrigins,
+		RedisAddr:         redisAddr,
+		RedisPassword:     redisPassword,
+		RedisDB:           redisDB,
+		CardEncryptionKey: cardEncryptionKey,
 	}
 }

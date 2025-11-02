@@ -3,6 +3,7 @@ package dto
 import "github.com/yusufziyrek/bank-app/internal/model"
 
 type CreateAccountRequest struct {
+	UserID  *int64  `json:"user_id,omitempty" validate:"omitempty,gt=0"`
 	Balance float64 `json:"balance" validate:"required,gte=0"`
 }
 

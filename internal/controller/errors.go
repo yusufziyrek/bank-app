@@ -15,6 +15,7 @@ const (
 	ErrInvalidBody            = "INVALID_BODY"
 	ErrAccountNotFound        = "ACCOUNT_NOT_FOUND"
 	ErrCardAlreadyExists      = "CARD_ALREADY_EXISTS"
+	ErrForbidden              = "FORBIDDEN"
 	ErrTransactionNotFound    = "TRANSACTION_NOT_FOUND"
 	ErrInsufficientFunds      = "INSUFFICIENT_FUNDS"
 	ErrInvalidTransactionType = "INVALID_TRANSACTION_TYPE"

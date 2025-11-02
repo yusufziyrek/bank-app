@@ -142,3 +142,28 @@ func getUserIDFromToken(c echo.Context) (int64, error) {
 	}
 	return int64(sub), nil
 }
+
+func getUserRoleFromToken(c echo.Context) (string, error) {
+	user := c.Get("user")
+	if user == nil {
+		return "", errors.New("user not found in context")
+	}
+	claims, ok := user.(*jwt.Token)
+	if !ok {
+		return "", errors.New("invalid jwt token")
+	}
+	mapClaims, ok := claims.Claims.(jwt.MapClaims)
+	if !ok {
+		return "", errors.New("invalid jwt claims")
+	}
+	role, ok := mapClaims["role"].(string)
+	if !ok {
+		return "", errors.New("user role not found in token")
+	}
+	return role, nil
+}
+
+func isAdmin(c echo.Context) bool {
+	role, err := getUserRoleFromToken(c)
+	return err == nil && role == "admin"
+}

@@ -22,6 +22,7 @@ type AccountService interface {
 	CreateAccount(ctx context.Context, a *model.Account) error
 	UpdateAccount(ctx context.Context, a *model.Account) error
 	DeleteAccount(ctx context.Context, id int64) error
+	NotifyAccountBalanceChanged(ctx context.Context, account model.Account)
 }
 
 type accountService struct {
@@ -270,6 +271,14 @@ func (s *accountService) DeleteAccount(ctx context.Context, id int64) error {
 	s.invalidateAccountCache(id)
 	s.invalidateAccountsByUserCache(acc.UserID)
 	return nil
+}
+
+func (s *accountService) NotifyAccountBalanceChanged(ctx context.Context, account model.Account) {
+	if account.ID == 0 {
+		return
+	}
+	s.invalidateAccountsByUserCache(account.UserID)
+	s.setAccountCache(account)
 }
 
 func generateAccountNumber() (string, error) {

@@ -129,7 +129,7 @@ func main() {
 	}
 
 	transactionRepo := repository.NewTransactionRepository(pool)
-	transactionSvc := service.NewTransactionService(transactionRepo, accountRepo)
+	transactionSvc := service.NewTransactionService(transactionRepo, accountRepo, accountSvc)
 
 	cardRepo := repository.NewCardRepository(pool)
 	cardSvc := service.NewCardService(cardRepo)

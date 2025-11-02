@@ -30,9 +30,6 @@ BankApp-RestAPI is a secure, high-performance backend service written in Go that
 
   * Spin up PostgreSQL via script
   * Automated schema initialization
-* **Caching Layer:**
-
-  * Optional Redis-backed user profile cache
 
 ---
 

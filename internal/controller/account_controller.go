@@ -24,6 +24,7 @@ func (a *AccountController) GetAll(c echo.Context) error {
 	if err != nil {
 		return sendError(c, http.StatusUnauthorized, ErrUnauthorized, "User not authenticated", err.Error())
 	}
+	admin := isAdmin(c)
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
@@ -34,18 +35,19 @@ func (a *AccountController) GetAll(c echo.Context) error {
 
 	var userAccounts []dto.AccountResponse
 	for _, acc := range accounts {
-		if acc.UserID == userID {
-			cards, _ := a.cardSvc.GetCardsByAccount(ctx, acc.ID)
-			userAccounts = append(userAccounts, dto.AccountResponse{
-				ID:            acc.ID,
-				UserID:        acc.UserID,
-				AccountNumber: acc.AccountNumber,
-				Balance:       acc.Balance,
-				CreatedAt:     acc.CreatedAt.Format(time.RFC3339),
-				UpdatedAt:     acc.UpdatedAt.Format(time.RFC3339),
-				Cards:         dto.MapCardsToDTO(cards),
-			})
+		if !admin && acc.UserID != userID {
+			continue
 		}
+		cards, _ := a.cardSvc.GetCardsByAccount(ctx, acc.ID)
+		userAccounts = append(userAccounts, dto.AccountResponse{
+			ID:            acc.ID,
+			UserID:        acc.UserID,
+			AccountNumber: acc.AccountNumber,
+			Balance:       acc.Balance,
+			CreatedAt:     acc.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:     acc.UpdatedAt.Format(time.RFC3339),
+			Cards:         dto.MapCardsToDTO(cards),
+		})
 	}
 	resp := dto.AccountsResponse{
 		Accounts: userAccounts,
@@ -59,6 +61,7 @@ func (a *AccountController) GetByID(c echo.Context) error {
 	if err != nil {
 		return sendError(c, http.StatusUnauthorized, ErrUnauthorized, "User not authenticated", err.Error())
 	}
+	admin := isAdmin(c)
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
@@ -72,7 +75,7 @@ func (a *AccountController) GetByID(c echo.Context) error {
 	if err != nil {
 		return handleServiceError(c, err, "fetch account")
 	}
-	if acc.UserID != userID {
+	if !admin && acc.UserID != userID {
 		return sendError(c, http.StatusForbidden, "FORBIDDEN", "Bu hesaba erişemezsiniz", "")
 	}
 	cards, _ := a.cardSvc.GetCardsByAccount(ctx, acc.ID)
@@ -125,6 +128,7 @@ func (a *AccountController) Create(c echo.Context) error {
 	if err != nil {
 		return sendError(c, http.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated", err.Error())
 	}
+	admin := isAdmin(c)
 	var req dto.CreateAccountRequest
 	if ok := bindAndValidate(c, &req); !ok {
 		return nil
@@ -133,8 +137,15 @@ func (a *AccountController) Create(c echo.Context) error {
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
+	targetUserID := userID
+	if admin && req.UserID != nil {
+		targetUserID = *req.UserID
+	}
+	if !admin && req.UserID != nil && *req.UserID != userID {
+		return sendError(c, http.StatusForbidden, ErrForbidden, "Bu kullanıcı için hesap oluşturma yetkiniz yok", "")
+	}
 	acc := &model.Account{
-		UserID:  userID,
+		UserID:  targetUserID,
 		Balance: req.Balance,
 	}
 	if err := a.svc.CreateAccount(ctx, acc); err != nil {
@@ -157,6 +168,11 @@ func (a *AccountController) Update(c echo.Context) error {
 	if herr != nil {
 		return c.JSON(herr.Code, herr.Message)
 	}
+	userID, err := getUserIDFromToken(c)
+	if err != nil {
+		return sendError(c, http.StatusUnauthorized, ErrUnauthorized, "User not authenticated", err.Error())
+	}
+	admin := isAdmin(c)
 
 	var req dto.UpdateAccountRequest
 	if ok := bindAndValidate(c, &req); !ok {
@@ -165,6 +181,14 @@ func (a *AccountController) Update(c echo.Context) error {
 
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
+
+	existing, err := a.svc.GetAccountByID(ctx, id)
+	if err != nil {
+		return handleServiceError(c, err, "fetch account")
+	}
+	if !admin && existing.UserID != userID {
+		return sendError(c, http.StatusForbidden, ErrForbidden, "Bu hesabı güncelleme yetkiniz yok", "")
+	}
 
 	acc := &model.Account{
 		ID:      id,
@@ -181,9 +205,22 @@ func (a *AccountController) Delete(c echo.Context) error {
 	if herr != nil {
 		return c.JSON(herr.Code, herr.Message)
 	}
+	userID, err := getUserIDFromToken(c)
+	if err != nil {
+		return sendError(c, http.StatusUnauthorized, ErrUnauthorized, "User not authenticated", err.Error())
+	}
+	admin := isAdmin(c)
 
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
+
+	existing, err := a.svc.GetAccountByID(ctx, id)
+	if err != nil {
+		return handleServiceError(c, err, "fetch account")
+	}
+	if !admin && existing.UserID != userID {
+		return sendError(c, http.StatusForbidden, ErrForbidden, "Bu hesabı silme yetkiniz yok", "")
+	}
 
 	if err := a.svc.DeleteAccount(ctx, id); err != nil {
 		return handleServiceError(c, err, "delete account")

@@ -21,10 +21,20 @@ func NewCardController(svc service.CardService, accountSvc service.AccountServic
 }
 
 func (cc *CardController) GetAll(c echo.Context) error {
+	userID, err := getUserIDFromToken(c)
+	if err != nil {
+		return sendError(c, http.StatusUnauthorized, ErrUnauthorized, "User not authenticated", err.Error())
+	}
+	admin := isAdmin(c)
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
-	cards, err := cc.svc.GetAllCards(ctx)
+	var cards []model.Card
+	if admin {
+		cards, err = cc.svc.GetAllCards(ctx)
+	} else {
+		cards, err = cc.svc.GetCardsByUser(ctx, userID)
+	}
 	if err != nil {
 		return handleServiceError(c, err, "fetch cards")
 	}
@@ -38,12 +48,28 @@ func (cc *CardController) GetByID(c echo.Context) error {
 			ErrInvalidCardID, "Invalid card ID", "ID must be a positive integer")
 	}
 
+	userID, err := getUserIDFromToken(c)
+	if err != nil {
+		return sendError(c, http.StatusUnauthorized,
+			ErrUnauthorized, "User not authenticated", err.Error())
+	}
+	admin := isAdmin(c)
+
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
 	card, err := cc.svc.GetCardByID(ctx, id)
 	if err != nil {
 		return handleServiceError(c, err, "fetch card")
+	}
+	if !admin {
+		account, err := cc.accountSv.GetAccountByID(ctx, card.AccountID)
+		if err != nil {
+			return handleServiceError(c, err, "fetch account")
+		}
+		if account.UserID != userID {
+			return sendError(c, http.StatusForbidden, ErrForbidden, "Bu karta erişim yetkiniz yok", "")
+		}
 	}
 	return c.JSON(http.StatusOK, dto.CardResponseFromModel(card))
 }
@@ -70,6 +96,7 @@ func (cc *CardController) Create(c echo.Context) error {
 	if err != nil {
 		return sendError(c, http.StatusUnauthorized, ErrUnauthorized, "User not authenticated", err.Error())
 	}
+	admin := isAdmin(c)
 
 	var req dto.CreateCardRequest
 	if ok := bindAndValidate(c, &req); !ok {
@@ -84,8 +111,8 @@ func (cc *CardController) Create(c echo.Context) error {
 	if err != nil {
 		return sendError(c, http.StatusBadRequest, "ACCOUNT_NOT_FOUND", "Hesap bulunamadı", err.Error())
 	}
-	if account.UserID != userID {
-		return sendError(c, http.StatusForbidden, "FORBIDDEN", "Bu hesaba kart ekleyemezsiniz", "")
+	if !admin && account.UserID != userID {
+		return sendError(c, http.StatusForbidden, ErrForbidden, "Bu hesaba kart ekleyemezsiniz", "")
 	}
 
 	defaultExpiry := time.Now().AddDate(5, 0, 0)
@@ -107,29 +134,52 @@ func (cc *CardController) Update(c echo.Context) error {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
 		return sendError(c, http.StatusBadRequest,
-			"INVALID_CARD_ID", "Invalid card ID", "ID must be a positive integer")
+			ErrInvalidCardID, "Invalid card ID", "ID must be a positive integer")
 	}
+
+	userID, err := getUserIDFromToken(c)
+	if err != nil {
+		return sendError(c, http.StatusUnauthorized, ErrUnauthorized, "User not authenticated", err.Error())
+	}
+	admin := isAdmin(c)
 
 	var req dto.UpdateCardRequest
 	if ok := bindAndValidate(c, &req); !ok {
 		return nil
 	}
-
-	updated := model.Card{ID: id}
-	if req.CardNumber != "" {
-		updated.CardNumber = req.CardNumber
-	}
-	if req.CVV != "" {
-		updated.CVV = req.CVV
-	}
-	if req.ExpiryDate != nil {
-		updated.ExpiryDate = *req.ExpiryDate
-	}
-
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
-	if err := cc.svc.UpdateCard(ctx, &updated); err != nil {
+	card, err := cc.svc.GetCardByID(ctx, id)
+	if err != nil {
+		return handleServiceError(c, err, "fetch card")
+	}
+	account, err := cc.accountSv.GetAccountByID(ctx, card.AccountID)
+	if err != nil {
+		return handleServiceError(c, err, "fetch account")
+	}
+	if !admin && account.UserID != userID {
+		return sendError(c, http.StatusForbidden, ErrForbidden, "Bu kart üzerinde işlem yapma yetkiniz yok", "")
+	}
+
+	changed := false
+	if req.CardNumber != "" {
+		card.CardNumber = req.CardNumber
+		changed = true
+	}
+	if req.CVV != "" {
+		card.CVV = req.CVV
+		changed = true
+	}
+	if req.ExpiryDate != nil {
+		card.ExpiryDate = *req.ExpiryDate
+		changed = true
+	}
+	if !changed {
+		return sendError(c, http.StatusBadRequest, ErrInvalidBody, "Güncellenecek alan belirtilmedi", "")
+	}
+
+	if err := cc.svc.UpdateCard(ctx, &card); err != nil {
 		return handleServiceError(c, err, "update card")
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -139,7 +189,7 @@ func (cc *CardController) UpdateStatus(c echo.Context) error {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
 		return sendError(c, http.StatusBadRequest,
-			"INVALID_CARD_ID", "Invalid card ID", "ID must be a positive integer")
+			ErrInvalidCardID, "Invalid card ID", "ID must be a positive integer")
 	}
 
 	var req dto.UpdateCardStatusRequest
@@ -147,8 +197,26 @@ func (cc *CardController) UpdateStatus(c echo.Context) error {
 		return nil
 	}
 
+	userID, err := getUserIDFromToken(c)
+	if err != nil {
+		return sendError(c, http.StatusUnauthorized, ErrUnauthorized, "User not authenticated", err.Error())
+	}
+	admin := isAdmin(c)
+
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
+
+	card, err := cc.svc.GetCardByID(ctx, id)
+	if err != nil {
+		return handleServiceError(c, err, "fetch card")
+	}
+	account, err := cc.accountSv.GetAccountByID(ctx, card.AccountID)
+	if err != nil {
+		return handleServiceError(c, err, "fetch account")
+	}
+	if !admin && account.UserID != userID {
+		return sendError(c, http.StatusForbidden, ErrForbidden, "Bu kart üzerinde işlem yapma yetkiniz yok", "")
+	}
 
 	if err := cc.svc.UpdateCardStatus(ctx, id, req.IsActive); err != nil {
 		return handleServiceError(c, err, "update card status")
@@ -160,11 +228,30 @@ func (cc *CardController) Delete(c echo.Context) error {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
 		return sendError(c, http.StatusBadRequest,
-			"INVALID_CARD_ID", "Invalid card ID", "ID must be a positive integer")
+			ErrInvalidCardID, "Invalid card ID", "ID must be a positive integer")
 	}
+
+	userID, err := getUserIDFromToken(c)
+	if err != nil {
+		return sendError(c, http.StatusUnauthorized,
+			ErrUnauthorized, "User not authenticated", err.Error())
+	}
+	admin := isAdmin(c)
 
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
+
+	card, err := cc.svc.GetCardByID(ctx, id)
+	if err != nil {
+		return handleServiceError(c, err, "fetch card")
+	}
+	account, err := cc.accountSv.GetAccountByID(ctx, card.AccountID)
+	if err != nil {
+		return handleServiceError(c, err, "fetch account")
+	}
+	if !admin && account.UserID != userID {
+		return sendError(c, http.StatusForbidden, ErrForbidden, "Bu kart üzerinde işlem yapma yetkiniz yok", "")
+	}
 
 	if err := cc.svc.DeleteCard(ctx, id); err != nil {
 		return handleServiceError(c, err, "delete card")

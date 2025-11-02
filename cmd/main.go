@@ -132,7 +132,7 @@ func main() {
 	transactionSvc := service.NewTransactionService(transactionRepo, accountRepo, accountSvc)
 
 	cardRepo := repository.NewCardRepository(pool)
-	cardSvc := service.NewCardService(cardRepo)
+	cardSvc := service.NewCardService(cardRepo, cfg.CardEncryptionKey)
 
 	routes.SetupRoutes(e, svc, accountSvc, transactionSvc, cardSvc, cfg.JwtSecret, time.Duration(cfg.JwtTTL)*time.Minute)
 

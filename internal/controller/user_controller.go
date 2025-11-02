@@ -18,6 +18,9 @@ func NewUserController(svc service.UserService) *UserController {
 }
 
 func (u *UserController) GetAll(c echo.Context) error {
+	if !isAdmin(c) {
+		return sendError(c, http.StatusForbidden, ErrForbidden, "Bu işlemi gerçekleştirme yetkiniz yok", "")
+	}
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
@@ -41,6 +44,13 @@ func (u *UserController) GetByID(c echo.Context) error {
 	if err != nil || id <= 0 {
 		return sendError(c, http.StatusBadRequest,
 			ErrInvalidUserID, "Invalid user ID", "ID must be a positive integer")
+	}
+	authUserID, authErr := getUserIDFromToken(c)
+	if authErr != nil {
+		return sendError(c, http.StatusUnauthorized, ErrUnauthorized, "User not authenticated", authErr.Error())
+	}
+	if !isAdmin(c) && authUserID != id {
+		return sendError(c, http.StatusForbidden, ErrForbidden, "Bu kullanıcıya erişme yetkiniz yok", "")
 	}
 
 	ctx, cancel := withTimeout(c.Request().Context())
@@ -73,9 +83,16 @@ func (u *UserController) MyProfile(c echo.Context) error {
 }
 
 func (u *UserController) UpdateEmail(c echo.Context) error {
-	userID, err := getUserIDFromToken(c)
+	id, herr := parseID(c)
+	if herr != nil {
+		return c.JSON(herr.Code, herr.Message)
+	}
+	authUserID, err := getUserIDFromToken(c)
 	if err != nil {
 		return sendError(c, http.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated", err.Error())
+	}
+	if !isAdmin(c) && authUserID != id {
+		return sendError(c, http.StatusForbidden, ErrForbidden, "Bu kullanıcıyı güncelleme yetkiniz yok", "")
 	}
 	var req dto.UpdateUserEmailRequest
 	if ok := bindAndValidate(c, &req); !ok {
@@ -84,7 +101,7 @@ func (u *UserController) UpdateEmail(c echo.Context) error {
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
-	if err := u.svc.UpdateUserEmail(ctx, userID, req.NewEmail); err != nil {
+	if err := u.svc.UpdateUserEmail(ctx, id, req.NewEmail); err != nil {
 		return handleServiceError(c, err, "update email")
 	}
 
@@ -92,9 +109,16 @@ func (u *UserController) UpdateEmail(c echo.Context) error {
 }
 
 func (u *UserController) UpdatePassword(c echo.Context) error {
-	userID, err := getUserIDFromToken(c)
+	id, herr := parseID(c)
+	if herr != nil {
+		return c.JSON(herr.Code, herr.Message)
+	}
+	authUserID, err := getUserIDFromToken(c)
 	if err != nil {
 		return sendError(c, http.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated", err.Error())
+	}
+	if !isAdmin(c) && authUserID != id {
+		return sendError(c, http.StatusForbidden, ErrForbidden, "Bu kullanıcının parolasını güncelleme yetkiniz yok", "")
 	}
 	var req dto.UpdateUserPasswordRequest
 	if ok := bindAndValidate(c, &req); !ok {
@@ -103,7 +127,7 @@ func (u *UserController) UpdatePassword(c echo.Context) error {
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
-	if err := u.svc.UpdateUserPassword(ctx, userID, req.NewPassword); err != nil {
+	if err := u.svc.UpdateUserPassword(ctx, id, req.NewPassword); err != nil {
 		return handleServiceError(c, err, "update password")
 	}
 
@@ -111,9 +135,12 @@ func (u *UserController) UpdatePassword(c echo.Context) error {
 }
 
 func (u *UserController) UpdateStatus(c echo.Context) error {
-	userID, err := getUserIDFromToken(c)
-	if err != nil {
-		return sendError(c, http.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated", err.Error())
+	id, herr := parseID(c)
+	if herr != nil {
+		return c.JSON(herr.Code, herr.Message)
+	}
+	if !isAdmin(c) {
+		return sendError(c, http.StatusForbidden, ErrForbidden, "Bu işlemi yalnızca yöneticiler yapabilir", "")
 	}
 	var req dto.UpdateUserStatusRequest
 	if ok := bindAndValidate(c, &req); !ok {
@@ -122,7 +149,7 @@ func (u *UserController) UpdateStatus(c echo.Context) error {
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
-	if err := u.svc.UpdateUserActiveStatus(ctx, userID, req.IsActive); err != nil {
+	if err := u.svc.UpdateUserActiveStatus(ctx, id, req.IsActive); err != nil {
 		return handleServiceError(c, err, "update status")
 	}
 
@@ -130,14 +157,21 @@ func (u *UserController) UpdateStatus(c echo.Context) error {
 }
 
 func (u *UserController) DeleteByID(c echo.Context) error {
-	userID, err := getUserIDFromToken(c)
+	id, herr := parseID(c)
+	if herr != nil {
+		return c.JSON(herr.Code, herr.Message)
+	}
+	authUserID, err := getUserIDFromToken(c)
 	if err != nil {
 		return sendError(c, http.StatusUnauthorized, "UNAUTHORIZED", "User not authenticated", err.Error())
+	}
+	if !isAdmin(c) && authUserID != id {
+		return sendError(c, http.StatusForbidden, ErrForbidden, "Bu kullanıcıyı silme yetkiniz yok", "")
 	}
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
-	if err := u.svc.DeleteUserByID(ctx, userID); err != nil {
+	if err := u.svc.DeleteUserByID(ctx, id); err != nil {
 		return handleServiceError(c, err, "delete user")
 	}
 

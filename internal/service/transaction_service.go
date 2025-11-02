@@ -21,10 +21,11 @@ type TransactionService interface {
 type transactionService struct {
 	repo    repository.TransactionRepository
 	accRepo repository.AccountRepository
+	accSvc  AccountService
 }
 
-func NewTransactionService(r repository.TransactionRepository, accRepo repository.AccountRepository) TransactionService {
-	return &transactionService{repo: r, accRepo: accRepo}
+func NewTransactionService(r repository.TransactionRepository, accRepo repository.AccountRepository, accSvc AccountService) TransactionService {
+	return &transactionService{repo: r, accRepo: accRepo, accSvc: accSvc}
 }
 
 func (s *transactionService) GetAllTransactions(ctx context.Context) ([]model.Transaction, error) {
@@ -44,7 +45,8 @@ func (s *transactionService) GetTransactionByID(ctx context.Context, id int64) (
 
 func (s *transactionService) CreateTransaction(ctx context.Context, t *model.Transaction, userID int64) error {
 	const maxTransactionAmount = 10000.0
-	return s.repo.WithTransaction(ctx, func(tx pgx.Tx) error {
+	updatedAccounts := make(map[int64]model.Account)
+	err := s.repo.WithTransaction(ctx, func(tx pgx.Tx) error {
 		acc, err := s.accRepo.GetAccountByID(ctx, t.AccountID)
 		if err != nil {
 			return fmt.Errorf("service:GetAccountByID: %w", err)
@@ -68,6 +70,7 @@ func (s *transactionService) CreateTransaction(ctx context.Context, t *model.Tra
 			if err := s.accRepo.UpdateAccount(ctx, &acc); err != nil {
 				return fmt.Errorf("service:UpdateAccount: %w", err)
 			}
+			updatedAccounts[acc.ID] = acc
 		case "withdraw":
 			if acc.Balance < t.Amount {
 				return ErrInsufficientFunds
@@ -76,6 +79,7 @@ func (s *transactionService) CreateTransaction(ctx context.Context, t *model.Tra
 			if err := s.accRepo.UpdateAccount(ctx, &acc); err != nil {
 				return fmt.Errorf("service:UpdateAccount: %w", err)
 			}
+			updatedAccounts[acc.ID] = acc
 		case "transfer":
 			if acc.Balance < t.Amount {
 				return ErrInsufficientFunds
@@ -105,6 +109,8 @@ func (s *transactionService) CreateTransaction(ctx context.Context, t *model.Tra
 			if err := s.accRepo.UpdateAccount(ctx, &recvAcc); err != nil {
 				return fmt.Errorf("service:UpdateReceiverAccount: %w", err)
 			}
+			updatedAccounts[acc.ID] = acc
+			updatedAccounts[recvAcc.ID] = recvAcc
 		default:
 			return ErrInvalidTransactionType
 		}
@@ -114,6 +120,17 @@ func (s *transactionService) CreateTransaction(ctx context.Context, t *model.Tra
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	if s.accSvc != nil {
+		for _, account := range updatedAccounts {
+			s.accSvc.NotifyAccountBalanceChanged(ctx, account)
+		}
+	}
+
+	return nil
 }
 
 func (s *transactionService) UpdateTransaction(ctx context.Context, t *model.Transaction) error {

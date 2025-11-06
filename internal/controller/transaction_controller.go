@@ -29,30 +29,29 @@ func (t *TransactionController) GetAll(c echo.Context) error {
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
-	var accountIDs map[int64]struct{}
-	if !admin {
-		accounts, err := t.accountSv.GetAccountsByUser(ctx, userID)
-		if err != nil {
-			return handleServiceError(c, err, "fetch user accounts")
+	var transactions []model.Transaction
+	if admin {
+		transactions, err = t.svc.GetAllTransactions(ctx)
+	} else {
+		accounts, acctErr := t.accountSv.GetAccountsByUser(ctx, userID)
+		if acctErr != nil {
+			return handleServiceError(c, acctErr, "fetch user accounts")
 		}
-		accountIDs = make(map[int64]struct{}, len(accounts))
+		if len(accounts) == 0 {
+			return c.JSON(http.StatusOK, dto.TransactionsResponse{Transactions: []dto.TransactionResponse{}, Count: 0})
+		}
+		ids := make([]int64, 0, len(accounts))
 		for _, a := range accounts {
-			accountIDs[a.ID] = struct{}{}
+			ids = append(ids, a.ID)
 		}
+		transactions, err = t.svc.GetTransactionsByAccountIDs(ctx, ids)
 	}
-
-	transactions, err := t.svc.GetAllTransactions(ctx)
 	if err != nil {
 		return handleServiceError(c, err, "fetch transactions")
 	}
 
 	responses := make([]dto.TransactionResponse, 0, len(transactions))
 	for _, tr := range transactions {
-		if !admin {
-			if _, ok := accountIDs[tr.AccountID]; !ok {
-				continue
-			}
-		}
 		responses = append(responses, dto.TransactionResponse{
 			ID:          tr.ID,
 			AccountID:   tr.AccountID,

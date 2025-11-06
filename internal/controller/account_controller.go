@@ -28,17 +28,22 @@ func (a *AccountController) GetAll(c echo.Context) error {
 	ctx, cancel := withTimeout(c.Request().Context())
 	defer cancel()
 
-	accounts, err := a.svc.GetAllAccounts(ctx)
+	var accounts []model.Account
+	if admin {
+		accounts, err = a.svc.GetAllAccounts(ctx)
+	} else {
+		accounts, err = a.svc.GetAccountsByUser(ctx, userID)
+	}
 	if err != nil {
 		return handleServiceError(c, err, "fetch accounts")
 	}
 
 	var userAccounts []dto.AccountResponse
 	for _, acc := range accounts {
-		if !admin && acc.UserID != userID {
-			continue
+		cards, cardErr := a.cardSvc.GetCardsByAccount(ctx, acc.ID)
+		if cardErr != nil {
+			return handleServiceError(c, cardErr, "fetch cards")
 		}
-		cards, _ := a.cardSvc.GetCardsByAccount(ctx, acc.ID)
 		userAccounts = append(userAccounts, dto.AccountResponse{
 			ID:            acc.ID,
 			UserID:        acc.UserID,
@@ -78,7 +83,10 @@ func (a *AccountController) GetByID(c echo.Context) error {
 	if !admin && acc.UserID != userID {
 		return sendError(c, http.StatusForbidden, "FORBIDDEN", "Bu hesaba erişemezsiniz", "")
 	}
-	cards, _ := a.cardSvc.GetCardsByAccount(ctx, acc.ID)
+	cards, cardErr := a.cardSvc.GetCardsByAccount(ctx, acc.ID)
+	if cardErr != nil {
+		return handleServiceError(c, cardErr, "fetch cards")
+	}
 	resp := dto.AccountResponse{
 		ID:            acc.ID,
 		UserID:        acc.UserID,
@@ -106,7 +114,10 @@ func (a *AccountController) MyAccounts(c echo.Context) error {
 
 	var resp []dto.AccountResponse
 	for _, acc := range accounts {
-		cards, _ := a.cardSvc.GetCardsByAccount(ctx, acc.ID)
+		cards, cardErr := a.cardSvc.GetCardsByAccount(ctx, acc.ID)
+		if cardErr != nil {
+			return handleServiceError(c, cardErr, "fetch cards")
+		}
 		resp = append(resp, dto.AccountResponse{
 			ID:            acc.ID,
 			UserID:        acc.UserID,

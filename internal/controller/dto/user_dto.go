@@ -57,8 +57,10 @@ type RefreshRequest struct {
 }
 
 type RefreshResponse struct {
-	Token     string    `json:"token"`
-	ExpiresAt time.Time `json:"expires_at"`
+	Token        string    `json:"token"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	RefreshToken string    `json:"refresh_token"`
+	RefreshExp   time.Time `json:"refresh_expires_at"`
 }
 
 func UserResponseFromModel(u model.User) UserResponse {

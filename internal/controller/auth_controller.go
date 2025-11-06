@@ -2,6 +2,7 @@ package controller
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -15,6 +16,16 @@ type AuthController struct {
 	svc       service.UserService
 	jwtSecret string
 	jwtTTL    time.Duration
+}
+
+const (
+	jwtIssuer   = "bank-app"
+	jwtAudience = "bank-app-clients"
+)
+
+type jwtCustomClaims struct {
+	Role string `json:"role"`
+	jwt.RegisteredClaims
 }
 
 func NewAuthController(svc service.UserService, jwtSecret string, jwtTTL time.Duration) *AuthController {
@@ -84,27 +95,47 @@ func (a *AuthController) Refresh(c echo.Context) error {
 	if ok := bindAndValidate(c, &req); !ok {
 		return nil
 	}
-	userID, err := a.svc.ValidateRefreshToken(c.Request().Context(), req.RefreshToken)
+	ctx := c.Request().Context()
+	storedToken, err := a.svc.ValidateRefreshToken(ctx, req.RefreshToken)
 	if err != nil {
 		return handleServiceError(c, err, "refresh token validate")
 	}
-	user, err := a.svc.GetUserByID(c.Request().Context(), userID)
+	user, err := a.svc.GetUserByID(ctx, storedToken.UserID)
 	if err != nil {
 		return handleServiceError(c, err, "refresh token user")
+	}
+	if !user.IsActive {
+		return sendError(c, http.StatusUnauthorized, ErrUnauthorized, "Hesabınız pasif durumda", "")
 	}
 	token, exp, err := a.issueToken(user)
 	if err != nil {
 		return handleServiceError(c, err, "token issue")
 	}
+	newRefreshToken, refreshExp, err := a.svc.GenerateRefreshToken(ctx, user.ID)
+	if err != nil {
+		return handleServiceError(c, err, "refresh token rotate")
+	}
 	return c.JSON(http.StatusOK, dto.RefreshResponse{
-		Token:     token,
-		ExpiresAt: exp,
+		Token:        token,
+		ExpiresAt:    exp,
+		RefreshToken: newRefreshToken,
+		RefreshExp:   refreshExp,
 	})
 }
 
 func (a *AuthController) issueToken(u model.User) (string, time.Time, error) {
 	exp := time.Now().Add(a.jwtTTL)
-	claims := jwt.MapClaims{"sub": u.ID, "exp": exp.Unix(), "role": u.Role}
+	now := time.Now()
+	claims := jwtCustomClaims{
+		Role: u.Role,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   strconv.FormatInt(u.ID, 10),
+			Issuer:    jwtIssuer,
+			Audience:  []string{jwtAudience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(exp),
+		},
+	}
 	t := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	s, err := t.SignedString([]byte(a.jwtSecret))
 	return s, exp, err

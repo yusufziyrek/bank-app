@@ -221,7 +221,7 @@ func (s *accountService) CreateAccount(ctx context.Context, a *model.Account) er
 
 	num, err := generateAccountNumber()
 	if err != nil {
-		return fmt.Errorf("service:generateAccountNumber: %w", err)
+		return err
 	}
 	a.AccountNumber = num
 
@@ -281,11 +281,14 @@ func (s *accountService) NotifyAccountBalanceChanged(ctx context.Context, accoun
 	s.setAccountCache(account)
 }
 
+const accountNumberDigits = 20
+
+var accountNumberUpperBound = new(big.Int).Exp(big.NewInt(10), big.NewInt(accountNumberDigits), nil)
+
 func generateAccountNumber() (string, error) {
-	b := make([]byte, 10)
-	_, err := rand.Read(b)
+	num, err := rand.Int(rand.Reader, accountNumberUpperBound)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("service:generateAccountNumber: %w", err)
 	}
-	return fmt.Sprintf("TR%020d", new(big.Int).SetBytes(b)), nil
+	return fmt.Sprintf("TR%0*d", accountNumberDigits, num), nil
 }

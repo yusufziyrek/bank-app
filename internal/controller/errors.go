@@ -12,6 +12,7 @@ const (
 	ErrAuthFailed             = "AUTH_FAILED"
 	ErrMaxAccountsReached     = "MAX_ACCOUNTS_REACHED"
 	ErrValidationError        = "VALIDATION_ERROR"
+	ErrMaxCardsReached        = "MAX_CARDS_REACHED"
 	ErrInvalidBody            = "INVALID_BODY"
 	ErrAccountNotFound        = "ACCOUNT_NOT_FOUND"
 	ErrCardAlreadyExists      = "CARD_ALREADY_EXISTS"

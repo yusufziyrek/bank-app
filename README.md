@@ -1,7 +1,7 @@
 ### BankApp-RestAPI Documentation
 
 **Overview:**
-BankApp-RestAPI is a secure, high-performance backend service written in Go that provides essential banking operations. It offers comprehensive CRUD operations for users, accounts, cards, and transactions—each protected via JWT authentication. Dockerized PostgreSQL support and automated setup scripts make development and testing seamless.
+BankApp-RestAPI is a secure, high-performance backend service written in Go that provides essential banking operations. It offers comprehensive CRUD operations for users, accounts, cards, and transactions—each protected via JWT authentication. Card data is protected with AES-GCM (PAN encrypted at rest, CVV hashed) and masked in responses. Dockerized PostgreSQL support and automated setup scripts make development and testing seamless. Optional Redis caching and in-memory rate limiting are available.
 
 ---
 
@@ -38,13 +38,12 @@ BankApp-RestAPI is a secure, high-performance backend service written in Go that
 
 ### **2. Tech Stack:**
 
-* **Go 1.20+**
+* **Go 1.24+**
 * **Echo Framework** for HTTP routing and middleware
 * **JWT** (`github.com/golang-jwt/jwt`) for token handling
 * **PostgreSQL** as the relational database
 * **Redis** for caching frequently fetched data
 * **Docker & Shell Scripts** for containerized setup
-* **Makefile** (optional) for automation
 
 ---
 
@@ -68,10 +67,10 @@ BankApp-RestAPI is a secure, high-performance backend service written in Go that
   `id`, `user_id`, `account_number`, `balance`, `created_at`, `updated_at`
 
 * **`cards`**
-  `id`, `account_id`, `card_number`, `cvv_hash`, `expiry_date`, `is_active`, `created_at`, `updated_at`
+  `id`, `account_id`, `card_number` (encrypted at rest), `cvv` (hashed), `expiry_date`, `is_active`, `created_at`, `updated_at`
 
 * **`transactions`**
-  `id`, `from_account_id`, `to_account_id` (nullable), `amount`, `type` (deposit/withdraw/transfer), `created_at`, `updated_at`
+  `id`, `account_id`, `to_account_id` (nullable), `amount`, `type` (deposit/withdraw/transfer), `description`, `created_at`
   
 ---
 
@@ -80,9 +79,9 @@ BankApp-RestAPI is a secure, high-performance backend service written in Go that
 #### **Authentication (Public):**
 
 * **`POST /api/v1/register`**
-  Registers a new user and returns a JWT token.
+  Registers a new user and returns JWT + refresh token.
 * **`POST /api/v1/login`**
-  Authenticates a user and returns a JWT token.
+  Authenticates a user and returns JWT + refresh token.
 * **`POST /api/v1/refresh`**
   Refreshes the JWT token.
 
@@ -91,7 +90,7 @@ BankApp-RestAPI is a secure, high-performance backend service written in Go that
 #### **User Management:**
 
 * **`GET    /api/v1/users`**
-  Lists all users.
+  Lists all users (admin only).
 * **`GET    /api/v1/users/:id`**
   Returns details for a specific user by ID.
 * **`GET    /api/v1/users/me`**
@@ -101,7 +100,7 @@ BankApp-RestAPI is a secure, high-performance backend service written in Go that
 * **`PUT    /api/v1/users/:id/password`**
   Updates a user’s password.
 * **`PUT    /api/v1/users/:id/status`**
-  Activates or deactivates a user account.
+  Activates or deactivates a user account (admin only).
 * **`DELETE /api/v1/users/:id`**
   Deletes a user.
 
@@ -110,15 +109,15 @@ BankApp-RestAPI is a secure, high-performance backend service written in Go that
 #### **Account Management:**
 
 * **`GET    /api/v1/accounts`**
-  Lists all accounts belonging to the authenticated user.
+  Lists accounts belonging to the authenticated user (admin sees all).
 * **`GET    /api/v1/accounts/me`**
   Alias for the above—lists user’s own accounts.
 * **`GET    /api/v1/accounts/:id`**
   Retrieves details for a specific account by ID.
 * **`POST   /api/v1/accounts`**
-  Creates a new bank account.
+  Creates a new bank account (max 3 accounts per user).
 * **`PUT    /api/v1/accounts/:id`**
-  Updates account details (e.g., account name).
+  Updates account balance (admin or owner).
 * **`DELETE /api/v1/accounts/:id`**
   Deletes an account.
 
@@ -133,11 +132,11 @@ BankApp-RestAPI is a secure, high-performance backend service written in Go that
 * **`GET    /api/v1/cards/:id`**
   Retrieves details for a specific card by ID.
 * **`POST   /api/v1/cards`**
-  Issues a new card.
+  Issues a new card (max 3 cards per account).
 * **`PUT    /api/v1/cards/:id`**
-  Replaces all updatable card fields (e.g., expiry date).
+  Updates card_number, CVV, or expiry_date.
 * **`PATCH  /api/v1/cards/:id`**
-  Partially updates card fields (e.g., nickname).
+  Partially updates card_number, CVV, or expiry_date.
 * **`PATCH  /api/v1/cards/:id/status`**
   Activates or deactivates a card.
 * **`DELETE /api/v1/cards/:id`**
@@ -161,8 +160,7 @@ BankApp-RestAPI is a secure, high-performance backend service written in Go that
 ---
 
 ### **6. JWT Authentication & Security:**
-> **Note:** All endpoints below require
-> Authorization: Bearer <JWT_TOKEN>
+> Note: All protected endpoints require `Authorization: Bearer <JWT_TOKEN>`
 
 * **Bearer Tokens:** Include in `Authorization` header.
 * **Roles:**
@@ -171,6 +169,9 @@ BankApp-RestAPI is a secure, high-performance backend service written in Go that
   * **User:** Access limited to own data
 * **Password Hashing:** bcrypt
 * **Token Expiry & Refresh:** Configurable TTL; use `/refresh` endpoint.
+* **Card Data:** PAN encrypted (AES-GCM) and masked in responses; CVV hashed and never returned.
+* **User Status Update:** `/users/:id/status` is restricted to admins only.
+* **Rate Limiting:** In-memory rate limiter enabled by default (20 requests/minute).
 
 ---
 
@@ -184,14 +185,14 @@ BankApp-RestAPI is a secure, high-performance backend service written in Go that
    ```
 2. **Create `.env`:**
 
-   ```dotenv
-   DATABASE_HOST=localhost
-   DATABASE_PORT=5432
-   DATABASE_NAME=bankapp
-   DATABASE_USER=postgres
-   DATABASE_PASSWORD=your-password
-   JWT_SECRET=YourSecretKey
-   ```
+  ```bash
+  cp .env.example .env
+  # Then edit .env and set real values:
+  # - PG_* (database connection)
+  # - JWT_SECRET (strong base64 key)
+  # - CARD_ENCRYPTION_KEY (strong base64 key)
+  # - REDIS_* (optional)
+  ```
 3. **Start test DB (Docker):**
 
   For local testing, use the provided example script:
@@ -207,18 +208,19 @@ BankApp-RestAPI is a secure, high-performance backend service written in Go that
 4. **(Optional) Start Redis cache:**
 
   ```bash
-  docker run --name redis-local -p 6379:6379 -d redis:8.2.2
+  docker run --name redis-local -p 6379:6379 -d redis:latest
   ```
 
   > Add `REDIS_ADDR=localhost:6379` to `.env`, plus `REDIS_PASSWORD` and `REDIS_DB=0` if needed. When Redis is offline the app transparently falls back to PostgreSQL only.
 
 5. **Install & Run:**
 
-   ```bash
-   go mod tidy
-   go build -o bankapp ./cmd
-   ./bankapp
-   ```
+  ```bash
+  go mod tidy
+  go run ./cmd
+  # or
+  go build -o bankapp ./cmd && ./bankapp
+  ```
 
 ---
 

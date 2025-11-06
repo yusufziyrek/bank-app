@@ -5,6 +5,7 @@ import "errors"
 var (
 	ErrAccountNotFound        = errors.New("account not found")
 	ErrMaxAccountsExceeded    = errors.New("max accounts per user exceeded")
+	ErrMaxCardsPerAccount     = errors.New("max cards per account exceeded")
 	ErrCardNotFound           = errors.New("card not found")
 	ErrCardAlreadyExists      = errors.New("card already exists")
 	ErrTransactionNotFound    = errors.New("transaction not found")

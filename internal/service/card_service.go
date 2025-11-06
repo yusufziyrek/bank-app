@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/yusufziyrek/bank-app/internal/model"
 	"github.com/yusufziyrek/bank-app/internal/repository"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type CardService interface {
@@ -54,9 +54,12 @@ func deriveCardKey(secret string) []byte {
 	return sum[:]
 }
 
-func hashCVV(cvv string) string {
-	sum := sha256.Sum256([]byte(cvv))
-	return hex.EncodeToString(sum[:])
+func hashCVV(cvv string) (string, error) {
+	hashed, err := bcrypt.GenerateFromPassword([]byte(cvv), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hashed), nil
 }
 
 func (s *cardService) encryptCardNumber(plain string) (string, error) {
@@ -168,16 +171,22 @@ func (s *cardService) CreateCard(ctx context.Context, card *model.Card) error {
 		return fmt.Errorf("service:CreateCard:getCardsByAccount: %w", err)
 	}
 	if len(cards) >= 3 {
-		return ErrMaxAccountsExceeded
+		return ErrMaxCardsPerAccount
 	}
 	plainPAN := card.CardNumber
 	encryptedPAN, err := s.encryptCardNumber(plainPAN)
 	if err != nil {
 		return fmt.Errorf("service:CreateCard:encryptPAN: %w", err)
 	}
-	hashedCVV := hashCVV(card.CVV)
+	hashedCVV, err := hashCVV(card.CVV)
+	if err != nil {
+		return fmt.Errorf("service:CreateCard:hashCVV: %w", err)
+	}
 	card.CardNumber = encryptedPAN
 	card.CVV = hashedCVV
+	if !card.IsActive {
+		card.IsActive = true
+	}
 	err = s.repo.AddCard(ctx, card)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -208,7 +217,11 @@ func (s *cardService) UpdateCard(ctx context.Context, card *model.Card) error {
 		updated.CardNumber = encrypted
 	}
 	if card.CVV != "" {
-		updated.CVV = hashCVV(card.CVV)
+		hashed, err := hashCVV(card.CVV)
+		if err != nil {
+			return fmt.Errorf("service:UpdateCard:hashCVV: %w", err)
+		}
+		updated.CVV = hashed
 	}
 	if !card.ExpiryDate.IsZero() {
 		updated.ExpiryDate = card.ExpiryDate

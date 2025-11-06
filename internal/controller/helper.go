@@ -84,6 +84,8 @@ func handleServiceError(c echo.Context, err error, operation string) error {
 		return sendError(c, http.StatusUnauthorized, ErrAuthFailed, err.Error(), "")
 	case errors.Is(err, service.ErrMaxAccountsExceeded):
 		return sendError(c, http.StatusBadRequest, ErrMaxAccountsReached, err.Error(), "")
+	case errors.Is(err, service.ErrMaxCardsPerAccount):
+		return sendError(c, http.StatusBadRequest, ErrMaxCardsReached, err.Error(), "")
 	case errors.Is(err, service.ErrCardAlreadyExists):
 		return sendError(c, http.StatusConflict, ErrCardAlreadyExists, err.Error(), "")
 	case errors.Is(err, service.ErrInsufficientFunds):
@@ -136,11 +138,22 @@ func getUserIDFromToken(c echo.Context) (int64, error) {
 	if !ok {
 		return 0, errors.New("invalid jwt claims")
 	}
-	sub, ok := mapClaims["sub"].(float64)
-	if !ok {
+	subClaim, exists := mapClaims["sub"]
+	if !exists {
 		return 0, errors.New("user id (sub) not found in token")
 	}
-	return int64(sub), nil
+	switch v := subClaim.(type) {
+	case float64:
+		return int64(v), nil
+	case string:
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return 0, errors.New("invalid user id format in token")
+		}
+		return id, nil
+	default:
+		return 0, errors.New("unsupported sub claim type")
+	}
 }
 
 func getUserRoleFromToken(c echo.Context) (string, error) {

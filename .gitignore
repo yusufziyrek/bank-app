@@ -1,6 +1,6 @@
 # Environment and sensitive files
 .env
-.env.*
+.env.compose
 *.pem
 *.key
 *.crt

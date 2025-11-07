@@ -1,0 +1,62 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:17.5
+    container_name: bankapp-postgres
+    env_file:
+      - .env.compose
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-postgres} -d ${PG_DB:-bankapp}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - banknet
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:8.2.2
+    container_name: bankapp-redis
+    env_file:
+      - .env.compose
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - banknet
+    ports:
+      - "6379:6379"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        RUN_TESTS: "false"        # Gerektiğinde true yapabilirsiniz
+    container_name: bankapp-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env.compose
+    ports:
+      - "8080:8080"
+    networks:
+      - banknet
+
+volumes:
+  db-data:
+
+networks:
+  banknet:
+    driver: bridge

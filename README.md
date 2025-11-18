@@ -38,7 +38,7 @@ BankApp-RestAPI is a secure, high-performance backend service written in Go that
 
 ### **2. Tech Stack:**
 
-* **Go 1.24+**
+* **Go 1.25+**
 * **Echo Framework** for HTTP routing and middleware
 * **JWT** (`github.com/golang-jwt/jwt`) for token handling
 * **PostgreSQL** as the relational database

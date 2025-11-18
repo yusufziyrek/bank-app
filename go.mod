@@ -1,6 +1,6 @@
 module github.com/yusufziyrek/bank-app
 
-go 1.24.4
+go 1.25.4
 
 require (
 	github.com/go-playground/validator/v10 v10.28.0
